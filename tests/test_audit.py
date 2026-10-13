@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from predictive_audit import audit, baselines
+from predictive_audit import audit, baselines, wide_to_long
 from predictive_audit.cli import main
 
 
@@ -92,6 +92,18 @@ def test_shuffled_split_detected_and_chronological_passes():
     assert good["temporal split"].status == "PASS"
 
 
+def test_datetime_time_and_history_only_rows():
+    """Training data lives elsewhere: warm-up rows are history, and timestamps are datetimes."""
+    df = frame_from_series(np.random.default_rng(7).normal(size=600).cumsum())
+    df["time"] = pd.date_range("2016-03-01", periods=len(df), freq="5min")
+    df["split"] = ["history"] * 12 + ["test"] * (len(df) - 12)
+    r = audit(df, "target", task="regression", time="time", split="split")
+    checks = {c.name: c for c in r.checks}
+    assert checks["temporal split"].status == "INFO"
+    assert np.isfinite(r.table["training mean"]["mae"])  # fit on the history rows
+    assert r.n_eval == len(df) - 12  # baselines may draw on history rows, so every test row scores
+
+
 def test_feature_leakage_only_flags_future_values():
     y = np.random.default_rng(3).normal(size=1000).cumsum()
     df = frame_from_series(y, horizon=2)
@@ -111,6 +123,46 @@ def test_regression_random_walk_persistence_is_best():
     r = audit(df, "target", task="regression", pred="pred", time="t", n_boot=100)
     assert r.best_baseline == "persistence"
     assert {c.name: c for c in r.checks}["beats trivial baselines"].status == "FAIL"
+
+
+def test_reported_error_metric_compares_against_best_baseline():
+    y = np.random.default_rng(6).normal(size=2000).cumsum()
+    df = frame_from_series(y)
+    r = audit(df, "target", task="regression", metric="mae", reported=10.0)
+    check = {c.name: c for c in r.checks}["reported score"]
+    assert check.details["baseline"] == "persistence"  # lowest error, not highest
+    assert check.status == "FAIL"  # persistence MAE ~0.8 beats a claimed 10.0
+
+
+def test_estimate_season_finds_replay_loop_and_ignores_random_walk():
+    rng = np.random.default_rng(8)
+    loop = rng.normal(size=127)  # one "pcap" replayed over and over, plus noise
+    periodic = pd.Series(np.tile(loop, 30) + rng.normal(scale=0.3, size=127 * 30))
+    walk = pd.Series(rng.normal(size=3000).cumsum())
+    everything = pd.Series(True, index=periodic.index)
+    assert baselines.estimate_season(periodic, None, everything) == 127
+    assert baselines.estimate_season(walk, None, pd.Series(True, index=walk.index)) is None
+
+
+def test_auto_season_uses_only_non_test_rows():
+    rng = np.random.default_rng(9)
+    y = np.r_[np.tile(rng.normal(size=50), 40), rng.normal(size=1000)]  # periodic train, noise test
+    df = frame_from_series(y)
+    df["split"] = np.where(np.arange(len(df)) < 2000, "train", "test")
+    r = audit(df, "target", task="regression", split="split", season="auto")
+    assert r.season == 50
+    assert "seasonal naive (m=50)" in r.table
+
+
+def test_wide_to_long_audits_each_column_as_its_own_series():
+    rng = np.random.default_rng(10)
+    wide = pd.DataFrame({"od_a": np.arange(100.0), "od_b": 1000 + rng.normal(size=100)})
+    wide["split"] = np.where(np.arange(100) < 80, "train", "test")
+    long = wide_to_long(wide, keep=["split"])
+    assert set(long["series"]) == {"od_a", "od_b"} and len(long) == 200
+    r = audit(long, "value", task="regression", groups="series", time="step", split="split")
+    # persistence must not carry od_a's last value into od_b's first row
+    assert r.n_eval == 40
 
 
 def test_input_validation():

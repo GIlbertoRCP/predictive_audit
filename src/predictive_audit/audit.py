@@ -27,6 +27,7 @@ class AuditReport:
     horizon: int
     metric: str
     model: str | None
+    season: int | None
     n_eval: int
     prevalence: float | None
     best_baseline: str
@@ -53,7 +54,7 @@ def audit(
     time: str | None = None,
     split: str | None = None,
     features: str | list[str] | None = None,
-    season: int | None = None,
+    season: int | str | None = None,
     window: int | None = None,
     metric: str | None = None,
     reported: float | None = None,
@@ -66,8 +67,10 @@ def audit(
     ``target`` is the value being forecast, already aligned so that row t holds
     y[t + horizon]. Rows are ordered by ``time`` (or kept in file order) within each
     group in ``groups``. ``pred`` is the model's prediction column (a score or label for
-    classification). ``split`` marks rows ``train`` / ``test``; only test rows are scored.
+    classification). ``split`` marks rows ``test`` (scored), ``train`` (checked for temporal
+    overlap with test) or anything else (history only, e.g. warm-up rows).
     ``reported`` is a published score on ``metric`` to check against trivial baselines.
+    ``season`` adds a seasonal-naive baseline; ``"auto"`` estimates the period from non-test rows.
     """
     if task not in ("classification", "regression"):
         raise ValueError("task must be 'classification' or 'regression'")
@@ -90,7 +93,8 @@ def audit(
 
     if split:
         labels = data[split].astype(str).str.lower()
-        test_mask, fit_mask = labels.eq("test"), labels.eq("train")
+        test_mask = labels.eq("test")
+        fit_mask = ~test_mask  # any non-test row is history the baselines may fit on
         if not test_mask.any():
             raise ValueError(f"no rows with {split} == 'test'")
     else:
@@ -100,6 +104,8 @@ def audit(
     if pred:
         model_name = model_name or pred
         preds[model_name] = data[pred].astype(float)
+    if season == "auto":
+        season = baselines.estimate_season(y, gkey, fit_mask)
     baseline_preds = baselines.all_baselines(y, gkey, horizon, task, fit_mask, season, window)
     preds.update(baseline_preds)
 
@@ -123,7 +129,7 @@ def audit(
     if reported is not None:
         checks.append(_reported_score(metric, reported, table, baseline_preds))
     if split:
-        checks.append(_temporal_split(data, split, time, gkey))
+        checks.append(_temporal_split(data, split, gkey))
     if features:
         checks.append(_feature_leakage(data, y, gkey, features, horizon))
 
@@ -133,6 +139,7 @@ def audit(
         horizon=horizon,
         metric=metric,
         model=model_name,
+        season=season,
         n_eval=n_eval,
         prevalence=float(y_eval.mean()) if task == "classification" else None,
         best_baseline=best,
@@ -192,8 +199,7 @@ def _beats_baselines(metric, y_true, model, baseline, baseline_name, block, n_bo
 
 def _reported_score(metric, reported, table, baseline_names) -> Check:
     lower = metric in metrics.LOWER_IS_BETTER
-    pick = min if lower else max
-    name = pick(baseline_names, key=lambda b: _nan_low(-table[b][metric] if lower else table[b][metric]))
+    name = max(baseline_names, key=lambda b: _nan_low(-table[b][metric] if lower else table[b][metric]))
     value = table[name][metric]
     gap = (value - reported) if lower else (reported - value)  # > 0 means the claim is ahead
     details = {"reported": reported, "baseline": name, "baseline_value": value, "gap": gap}
@@ -208,11 +214,13 @@ def _reported_score(metric, reported, table, baseline_names) -> Check:
     return Check("reported score", "PASS", f"{text}.", details)
 
 
-def _temporal_split(data, split, time, gkey) -> Check:
+def _temporal_split(data, split, gkey) -> Check:
     labels = data[split].astype(str).str.lower()
     keys = gkey if gkey is not None else pd.Series(0, index=data.index)
-    clock = data[time] if time else keys.groupby(keys).cumcount()
+    clock = keys.groupby(keys).cumcount()  # data is already in time order within each group
     frame = pd.DataFrame({"g": keys, "t": clock, "test": labels.eq("test"), "train": labels.eq("train")})
+    if not frame.train.any():
+        return Check("temporal split", "INFO", "No rows are labelled 'train', so there is no overlap to check.")
 
     last_train = frame[frame.train].groupby("g")["t"].max()
     test = frame[frame.test]

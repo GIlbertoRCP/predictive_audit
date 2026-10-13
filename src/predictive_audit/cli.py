@@ -15,6 +15,10 @@ def _csv_list(value: str | None) -> list[str]:
     return [v.strip() for v in value.split(",") if v.strip()] if value else []
 
 
+def _season(value: str) -> int | str:
+    return value if value == "auto" else int(value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="predictive-audit",
@@ -28,9 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-name", help="display name for the model")
     p.add_argument("--group", help="comma-separated columns identifying each series")
     p.add_argument("--time", help="time column (otherwise file order within each series)")
-    p.add_argument("--split", help="column with train/test labels; only test rows are scored")
+    p.add_argument("--split", help="column labelling rows test / train / other; only test rows are scored, other rows are history")
     p.add_argument("--features", help="comma-separated feature columns to scan for future leakage")
-    p.add_argument("--season", type=int, help="season length for a seasonal-naive baseline")
+    p.add_argument("--season", type=_season, help="season length for a seasonal-naive baseline, or 'auto'")
     p.add_argument("--window", type=int, help="moving-average window (default max(3, horizon))")
     p.add_argument("--metric", help="headline metric (default f1 / mae)")
     p.add_argument("--reported", type=float, help="a published score on --metric to check")

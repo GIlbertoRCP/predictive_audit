@@ -26,7 +26,12 @@ caught it, so I can run them on other published results.
 |---|---|---|---|---|
 | 01 | [Predictive_Activation v0 congestion forecaster](cases/01_predictive_activation_lstm/) | F1 ≈ 0.99 | **FAIL** | Shuffled split leaks; with a chronological split the model *loses* to a 3-step moving average (F1 0.984 vs 0.987, CI excludes 0). |
 
-More cases (public network-telemetry and traffic forecasting results) are in progress.
+| 02 | [xiaochus/TrafficFlowPrediction](cases/02_xiaochus_pems/) (681★), PeMS freeway flow, LSTM/GRU/SAEs | MAE 7.06–7.21, R² 0.94 | **holds up** (WARN) | Audited with the repo's own weights (reproduced to 2 decimals). Models beat a 3-step moving average by 8–10% MAE; the headline R² is mostly autocorrelation (persistence alone: 0.92). |
+
+| 04 | [SDN-TMprediction](cases/04_sdn_tm_prediction/) (IEEE ICC 2021), LSTM/BiLSTM/GRU on a Mininet testbed | RNN variants compared only with each other | **FAIL** (9 of 13 series) | Testbed traffic is replayed pcaps, so it loops. "Same value one replay loop ago" beats the RNNs on 9 of 13 OD pairs, and is 2.4× more accurate on the notebook's showcased pair. |
+| 05 | [Annongkhanh/Traffic-matrix-prediction](cases/05_sdn_tm_lstm_geant_zamren/), LSTM on GÉANT + Mininet testbed | MSE 0.026 (GÉANT), 0.041 (testbed) | **FAIL** | Reported error is *higher* than a trivial baseline's on both datasets: on GÉANT, persistence alone has about 2.5× lower MSE. |
+
+More cases are in progress; see [cases/SHORTLIST.md](cases/SHORTLIST.md).
 
 ## Usage
 
@@ -57,6 +62,7 @@ code, so the audit can gate CI.
 ```bash
 uv run pytest
 uv run python cases/01_predictive_activation_lstm/run.py
+uv run --group cases python cases/02_xiaochus_pems/run.py   # fetches pinned third-party data/weights
 ```
 
 ## Limitations

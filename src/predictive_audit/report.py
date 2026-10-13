@@ -30,6 +30,8 @@ def _header(report: AuditReport) -> list[str]:
         f"target: {report.target}   task: {report.task}   horizon: {report.horizon}   "
         f"metric: {report.metric}   rows scored: {report.n_eval}"
     ]
+    if report.season:
+        lines.append(f"seasonal period: {report.season} steps")
     if report.prevalence is not None:
         lines.append(f"positive rate: {report.prevalence:.3f}")
     return lines

@@ -10,6 +10,11 @@ dependencies = ["numpy>=1.26", "pandas>=2.0", "scikit-learn>=1.4"]
 predictive-audit = "predictive_audit.cli:main"
 
 [dependency-groups]
+cases = [
+    "h5py>=3.16.0",
+    "tabulate>=0.10.0",
+    "torch>=2.14.1",
+]
 dev = ["pytest>=8"]
 
 [build-system]

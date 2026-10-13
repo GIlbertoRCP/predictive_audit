@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
 
 
@@ -49,6 +50,38 @@ def constant(target, fit_mask, task):
     else:
         value = float(fit.mean())
     return pd.Series(value, index=target.index)
+
+
+def estimate_season(target, groups, fit_mask, max_lag=2000, min_lag=2):
+    """Dominant period of the target, from the autocorrelation of fit (non-test) rows only.
+
+    Autocorrelation is pooled across groups. A period counts only if the autocorrelation
+    first decays below 0.5 and then rises again by at least 0.2 to a peak of 0.3 or more;
+    smooth trending series (random walks) have no such rise and return None.
+    """
+    fit = target.where(fit_mask)
+    keys = groups if groups is not None else pd.Series(0, index=target.index)
+    series = [s.dropna().to_numpy(float) for _, s in fit.groupby(keys, sort=False)]
+    series = [s - s.mean() for s in series if len(s) > 4 * min_lag and s.std() > 0]
+    if not series:
+        return None
+    top = min(max_lag, max(len(s) for s in series) // 2)
+    num, den = np.zeros(top + 1), 0.0
+    for s in series:
+        f = np.fft.rfft(s, 2 * len(s))
+        acov = np.fft.irfft(f * np.conj(f))[: min(len(s), top + 1)]  # sum of s[:-k] * s[k:]
+        num[: len(acov)] += acov
+        den += float(s @ s)
+    ac = num / den
+    decayed = np.nonzero(ac[min_lag:] < 0.5)[0]
+    if len(decayed) == 0:
+        return None
+    start = min_lag + int(decayed[0])
+    peak = start + int(np.argmax(ac[start:]))
+    trough = float(ac[start:peak + 1].min())
+    if ac[peak] < 0.3 or ac[peak] - trough < 0.2:
+        return None
+    return peak
 
 
 def all_baselines(target, groups, horizon, task, fit_mask, season=None, window=None):
