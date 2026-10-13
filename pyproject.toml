@@ -1,0 +1,23 @@
+[project]
+name = "predictive-audit"
+version = "0.1.0"
+description = "Check whether a time-series forecasting result actually beats trivial baselines."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pandas>=2.0", "scikit-learn>=1.4"]
+
+[project.scripts]
+predictive-audit = "predictive_audit.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
