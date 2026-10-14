@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Did the model beat yesterday?</title>
+<meta name="description" content="Auditing published network-traffic forecasting results against trivial baselines.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #6f6d68;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.10);
+  --model: #2a78d6;
+  --baseline: #eb6834;
+  --wash: rgba(42, 120, 214, 0.08);
+  --good: #006300;
+  --bad: #b42d2d;
+  --warn: #8a5a00;
+  --code-bg: #f0efec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #9a988f;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255, 255, 255, 0.10);
+    --model: #3987e5;
+    --baseline: #d95926;
+    --wash: rgba(57, 135, 229, 0.12);
+    --good: #0ca30c;
+    --bad: #e66767;
+    --warn: #e0a326;
+    --code-bg: #232321;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #9a988f;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ring: rgba(255, 255, 255, 0.10);
+  --model: #3987e5;
+  --baseline: #d95926;
+  --wash: rgba(57, 135, 229, 0.12);
+  --good: #0ca30c;
+  --bad: #e66767;
+  --warn: #e0a326;
+  --code-bg: #232321;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 760px; margin: 0 auto; padding: 56px 16px 96px; }
+header.hero { margin-bottom: 48px; }
+.kicker { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+h1 { font-size: clamp(32px, 6vw, 46px); line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
+h2 { font-size: 26px; line-height: 1.2; margin: 72px 0 8px; letter-spacing: -0.01em; }
+h3 { font-size: 17px; margin: 32px 0 4px; }
+.case-tag { font-size: 13px; color: var(--muted); margin: 0 0 16px; }
+p { margin: 0 0 16px; color: var(--ink); }
+.lede { font-size: 20px; line-height: 1.5; color: var(--ink-2); }
+a { color: var(--model); text-underline-offset: 2px; }
+code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+pre code { background: none; padding: 0; }
+strong { font-weight: 650; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 28px 0 8px; }
+.stat { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 14px 16px; }
+.stat .value { font-size: 30px; font-weight: 650; line-height: 1.1; }
+.stat .label { font-size: 13px; color: var(--ink-2); margin-top: 6px; line-height: 1.35; }
+
+figure { margin: 28px 0 32px; background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 18px 18px 12px; }
+figcaption { font-size: 14px; color: var(--ink-2); margin-top: 10px; line-height: 1.45; }
+.fig-title { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+.fig-sub { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { fill: var(--muted); font: 11.5px system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; }
+.chart .label-strong { fill: var(--ink); font-weight: 600; }
+.chart .label-2 { fill: var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); margin: 0 0 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.key { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+.key.dot { width: 9px; height: 9px; border-radius: 50%; }
+.tooltip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--ring); box-shadow: 0 4px 16px rgba(0,0,0,.12); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); white-space: nowrap; opacity: 0; transition: opacity .08s; z-index: 2; }
+.tooltip strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.tooltip .row { display: flex; align-items: center; gap: 7px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; font-size: 13px; color: var(--ink-2); }
+.seg { display: inline-flex; border: 1px solid var(--ring); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; color: var(--ink-2); background: transparent; border: 0; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--ring); }
+.seg button[aria-pressed="true"] { background: var(--code-bg); color: var(--ink); font-weight: 600; }
+input[type="range"] { width: min(260px, 100%); accent-color: var(--model); }
+details { margin-top: 8px; font-size: 13px; color: var(--ink-2); }
+details summary { cursor: pointer; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+th { color: var(--ink-2); font-weight: 600; }
+td.num, th.num { text-align: right; }
+.verdict { font-weight: 650; font-size: 13px; white-space: nowrap; }
+.verdict::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.verdict.fail { color: var(--bad); } .verdict.fail::before { background: var(--bad); }
+.verdict.pass { color: var(--good); } .verdict.pass::before { background: var(--good); }
+.verdict.warn { color: var(--warn); } .verdict.warn::before { background: var(--warn); }
+.scoreboard td:first-child { width: 36px; color: var(--muted); }
+.scoreboard-wrap { overflow-x: auto; }
+ul.checks { padding-left: 20px; } ul.checks li { margin-bottom: 8px; }
+footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--grid); font-size: 13.5px; color: var(--ink-2); }
+footer p { color: var(--ink-2); }
+.theme-toggle { position: absolute; top: 12px; right: 12px; font: 13px system-ui, sans-serif; color: var(--ink-2); background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+@media (max-width: 560px) {
+  body { font-size: 16px; }
+  main { padding-top: 64px; }
+  .lede { font-size: 18px; }
+  figure { padding: 14px 12px 10px; }
+}
+</style>
+</head>
+<body>
+<button class="theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">Theme</button>
+<main>
+
+<header class="hero">
+  <p class="kicker">predictive-audit · a reproducibility study</p>
+  <h1>Did the model beat yesterday?</h1>
+  <p class="lede">I audited five published network-traffic forecasting results against the dumbest possible
+  forecasts: <em>the next value equals the current one</em>, a short moving average, and <em>the same value one cycle ago</em>.
+  Four of the five do not clearly beat them.</p>
+  <div class="stats" id="hero-stats"></div>
+</header>
+
+<section>
+<h2>The bar every forecast has to clear</h2>
+<p>Network traffic, like most operational time series, is <strong>autocorrelated</strong>: the next five minutes look a lot like
+the last five. A forecaster that simply repeats the latest value, called <em>persistence</em>, gets a high score without
+learning anything. So a model's raw score says little; what matters is its margin over persistence.</p>
+<p>Drag the slider to see how much "accuracy" autocorrelation hands out for free.</p>
+<figure>
+  <p class="fig-title">How well does "next = current" score?</p>
+  <p class="fig-sub">A simulated series with lag-1 autocorrelation φ. No model is involved at all.</p>
+  <div class="controls">
+    <label for="phi">Autocorrelation φ = <strong id="phi-val">0.95</strong></label>
+    <input id="phi" type="range" min="0" max="0.99" step="0.01" value="0.95">
+    <span>persistence R² = <strong id="phi-r2">–</strong></span>
+  </div>
+  <div class="chart" id="chart-ar"></div>
+  <figcaption>At the autocorrelation typical of 5-minute traffic (0.9–0.96 in the datasets below), persistence alone
+  scores an R² of roughly 0.8–0.92. A paper reporting R² = 0.94 has shown very little until it reports this number too.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2>Case 01: my own model</h2>
+<p class="case-tag">Predictive_Activation v0 · CU Denver course project · congestion forecaster on Mininet telemetry</p>
+<p>This project started with my team's course project, which reported a congestion forecaster with an F1 score around 0.99.
+It turned out the label was almost never changing: <em>congested at the next step</em> equalled <em>congested now</em>
+98% of the time. On top of that, the evaluation shuffled overlapping windows before splitting, so the test set was
+full of near-copies of training examples.</p>
+<figure>
+  <p class="fig-title">The label rarely changes, so remembering it is enough</p>
+  <p class="fig-sub" id="case01-sub"></p>
+  <div class="legend"><span><i class="key" style="background:var(--model)"></i>Latency (ms)</span><span><i class="key" style="background:var(--baseline)"></i>100 ms congestion threshold</span></div>
+  <div class="chart" id="chart-case01-strip"></div>
+</figure>
+<figure>
+  <p class="fig-title">F1 on the same task, two ways of splitting the data</p>
+  <p class="fig-sub">Gradient-boosted stand-in for the original LSTM, same windows and label</p>
+  <div class="legend"><span><i class="key dot" style="background:var(--model)"></i>Model</span><span><i class="key dot" style="background:var(--baseline)"></i>Best trivial baseline</span></div>
+  <div class="chart" id="chart-case01-f1"></div>
+  <figcaption>With the original shuffled split, the model edges out the baselines. With an honest chronological split,
+  a 3-step moving average of the label beats it, and the 95% block-bootstrap interval excludes zero.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2>Case 04: the traffic was on a loop</h2>
+<p class="case-tag">SDN-TMprediction · IEEE ICC 2021 · LSTM, BiLSTM, GRU on a Mininet testbed</p>
+<p>This paper built an SDN testbed in Mininet, generated traffic by replaying packet captures with
+<code>tcpreplay</code>, and trained recurrent networks to predict each origin–destination flow from its last 10 minutes.
+The RNNs were compared only with each other.</p>
+<p>Replayed captures loop. Each host's traffic repeats with its own period, and you can see it in the autocorrelation
+of the training data:</p>
+<figure>
+  <p class="fig-title">Autocorrelation of the showcased flow (OD 52), training period</p>
+  <p class="fig-sub">Lag in minutes. Almost no memory at lag 1, a strong echo at the replay period.</p>
+  <div class="chart" id="chart-acf"></div>
+</figure>
+<p>A 10-minute input window cannot see a 339-minute loop. A baseline that predicts "the value one loop ago",
+with the period estimated from training data only, can:</p>
+<figure>
+  <p class="fig-title">Test period, OD 52: actual traffic vs. the paper's best model and the replay baseline</p>
+  <p class="fig-sub">Min-max scaled throughput, one point per minute</p>
+  <div class="controls">
+    <span class="seg" role="group" aria-label="Time window" id="case04-window">
+      <button type="button" data-n="120" aria-pressed="true">2 hours</button>
+      <button type="button" data-n="360" aria-pressed="false">6 hours</button>
+      <button type="button" data-n="0" aria-pressed="false">Whole test set</button>
+    </span>
+  </div>
+  <div class="legend"><span><i class="key" style="background:var(--ink)"></i>Actual</span><span><i class="key" style="background:var(--model)"></i>BiLSTM (paper's best)</span><span><i class="key" style="background:var(--baseline)"></i>Same value one loop ago</span></div>
+  <div class="chart" id="chart-case04"></div>
+</figure>
+<figure>
+  <p class="fig-title">Test RMSE on OD 52 (lower is better)</p>
+  <p class="fig-sub">Re-implemented training reproduces the notebook's logged losses within about 10%</p>
+  <div class="chart" id="chart-case04-rmse"></div>
+</figure>
+<p>It is not just one flow. Across 13 OD pairs (the notebook's pick plus 12 drawn at random), the RNNs lose to a trivial
+baseline on 9:</p>
+<figure>
+  <p class="fig-title">BiLSTM error relative to the best trivial baseline, per OD pair</p>
+  <p class="fig-sub">Ratio of RMSEs; left of 1 means the BiLSTM wins</p>
+  <div class="chart" id="chart-case04-ods"></div>
+</figure>
+</section>
+
+<section>
+<h2>Case 03: 785 LSTMs on real backbones</h2>
+<p class="case-tag">THU-INSC-NAD/Traffic-Matrix-Prediction · ISCC 2019 · Abilene, GÉANT, CERNET</p>
+<p>The classic public traffic-matrix datasets come from real research backbones, sampled every 5 or 15 minutes. This
+codebase trains one LSTM per origin–destination pair and feeds the predictions into traffic engineering. I retrained all
+785 non-trivial pairs with the repository's exact settings.</p>
+<figure>
+  <p class="fig-title">LSTM error relative to persistence, per OD pair</p>
+  <p class="fig-sub">Ratio of MAEs on the test period; left of 1 means the LSTM wins</p>
+  <div class="chart" id="chart-case03"></div>
+  <figcaption id="case03-caption"></figcaption>
+</figure>
+<p>Pooled over each network, the LSTM is significantly worse than persistence on all three. A plain linear model on the
+same 10 inputs beats the LSTM everywhere. Running the configuration the code's own comments call "best" made the LSTM worse, not better.</p>
+<div class="scoreboard-wrap"><table id="case03-table"></table></div>
+</section>
+
+<section>
+<h2>Case 05: a reported number worse than "do nothing"</h2>
+<p class="case-tag">Annongkhanh/Traffic-matrix-prediction · LSTM on GÉANT and a Mininet testbed</p>
+<p>Sometimes no retraining is needed. This project prints a single test error per dataset. Scoring trivial baselines on the
+same test cells, in the same scaled units, shows both numbers are worse than repeating the last traffic matrix.</p>
+<figure>
+  <p class="fig-title">Test RMSE, scaled units (lower is better)</p>
+  <div class="legend"><span><i class="key dot" style="background:var(--model)"></i>Reported LSTM</span><span><i class="key dot" style="background:var(--baseline)"></i>Trivial baselines</span></div>
+  <div class="chart" id="chart-case05"></div>
+</figure>
+</section>
+
+<section>
+<h2>Case 02: one that holds up</h2>
+<p class="case-tag">xiaochus/TrafficFlowPrediction · 681★ on GitHub · freeway flow (PeMS), LSTM / GRU / stacked autoencoders</p>
+<p>An audit that fails everything would be worthless. This repository ships its trained weights, so I ran the exact
+published models. They reproduce the README to two decimals and genuinely beat every trivial baseline, by 8–10% MAE.</p>
+<p>The headline number is still misleading: an R² of 0.94 sounds near-perfect, but persistence alone scores 0.92.</p>
+<figure>
+  <p class="fig-title">Freeway flow, first test day</p>
+  <p class="fig-sub">Vehicles per 5 minutes, one detector</p>
+  <div class="legend"><span><i class="key" style="background:var(--ink)"></i>Actual</span><span><i class="key" style="background:var(--model)"></i>SAEs (published weights)</span><span><i class="key" style="background:var(--baseline)"></i>Persistence</span></div>
+  <div class="chart" id="chart-case02"></div>
+</figure>
+<div class="stats" id="case02-stats"></div>
+</section>
+
+<section>
+<h2>Scoreboard</h2>
+<div class="scoreboard-wrap"><table class="scoreboard" id="scoreboard"></table></div>
+</section>
+
+<section>
+<h2>What to check before believing a forecast</h2>
+<ul class="checks">
+  <li><strong>Report persistence and a seasonal-naive baseline</strong> on the same rows, with the period chosen from training data. If the data loops or has daily cycles, the seasonal baseline is the one that matters.</li>
+  <li><strong>Report the margin, with an interval that respects autocorrelation.</strong> A moving-block bootstrap, not an i.i.d. one.</li>
+  <li><strong>Split by time.</strong> Shuffling overlapping windows before splitting puts near-copies of training data in the test set.</li>
+  <li><strong>Distrust R² and accuracy on smooth or sticky series.</strong> Both are inflated by autocorrelation and class imbalance.</li>
+  <li><strong>Include one simple learned model</strong>, such as a linear AR on the same inputs. In case 03 it beat the LSTM on every network.</li>
+</ul>
+<h3>Run the audit on your own result</h3>
+<pre><code>uv run predictive-audit predictions.csv \
+    --target y_next --pred model --group series --time t \
+    --split split --season auto --metric mae --reported 0.123</code></pre>
+<p>The tool, every case's reproduction script, and the full per-case write-ups are in the
+<a href="https://github.com/GIlbertoRCP/predictive_audit">repository</a>.</p>
+</section>
+
+<footer>
+<p><strong>Method notes.</strong> Third-party data and weights are fetched at a pinned commit and verified by SHA-256; none is
+redistributed beyond the small excerpts plotted here. Cases 03 and 04 are faithful re-implementations (single seed), case 02 runs
+the published weights, case 05 compares printed numbers. Each case's README lists its caveats.</p>
+<p>Audited repositories: <a href="https://github.com/xiaochus/TrafficFlowPrediction">xiaochus/TrafficFlowPrediction</a>,
+<a href="https://github.com/THU-INSC-NAD/Traffic-Matrix-Prediction">THU-INSC-NAD/Traffic-Matrix-Prediction</a>,
+<a href="https://github.com/duchuyle108/SDN-TMprediction">duchuyle108/SDN-TMprediction</a>,
+<a href="https://github.com/Annongkhanh/Traffic-matrix-prediction">Annongkhanh/Traffic-matrix-prediction</a>,
+and my own <a href="https://github.com/GIlbertoRCP/Predictive_Activation">Predictive_Activation</a>. Thanks to their authors for publishing code and data. That is what made checking possible.</p>
+<p>Gilberto Romero-Cano</p>
+</footer>
+</main>
+
+<script>
+(() => {
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// ---------- tiny SVG chart kit ----------
+function svgEl(tag, attrs = {}, parent) {
+  const node = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (parent) parent.appendChild(node);
+  return node;
+}
+function text(parent, x, y, str, attrs = {}) {
+  const t = svgEl("text", { x, y, ...attrs }, parent);
+  t.textContent = str;
+  return t;
+}
+function niceTicks(min, max, count = 5) {
+  const span = max - min || 1;
+  const step0 = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => span / s <= count) || 10 * mag;
+  const out = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? "–" : v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
+
+function tooltip(mount) {
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  mount.appendChild(tip);
+  return {
+    show(x, y, rows, title) {
+      tip.replaceChildren();
+      if (title) { const h = document.createElement("div"); h.textContent = title; tip.appendChild(h); }
+      for (const r of rows) {
+        const row = document.createElement("div"); row.className = "row";
+        if (r.color) { const k = document.createElement("i"); k.className = "key dot"; k.style.background = r.color; row.appendChild(k); }
+        const v = document.createElement("strong"); v.textContent = r.value; row.appendChild(v);
+        const l = document.createElement("span"); l.textContent = r.label; row.appendChild(l);
+        tip.appendChild(row);
+      }
+      const w = mount.clientWidth;
+      const tw = tip.offsetWidth;
+      tip.style.left = Math.max(0, Math.min(w - tw, x + 12)) + "px";
+      tip.style.top = Math.max(0, y - 10) + "px";
+      tip.style.opacity = 1;
+    },
+    hide() { tip.style.opacity = 0; },
+  };
+}
+
+// Line chart with crosshair. series: [{name, values, color, width}]
+function lineChart(mount, { series, height = 260, x0 = 0, xStep = 1, xFormat = (v) => v, yFormat = (v) => fmt(v), yDomain, xTicks, markers = [], refY }) {
+  mount.replaceChildren();
+  const width = mount.clientWidth;
+  const m = { t: 10, r: 14, b: 26, l: 44 };
+  const n = Math.max(...series.map((s) => s.values.length));
+  const all = series.flatMap((s) => s.values.filter((v) => v != null));
+  let [lo, hi] = yDomain || [Math.min(...all), Math.max(...all)];
+  if (!yDomain) { const pad = (hi - lo) * 0.06; lo -= pad; hi += pad; }
+  const X = (i) => m.l + (i / Math.max(1, n - 1)) * (width - m.l - m.r);
+  const Y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (height - m.t - m.b);
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, height, role: "img" }, mount);
+  for (const t of niceTicks(lo, hi, 4)) {
+    svgEl("line", { x1: m.l, x2: width - m.r, y1: Y(t), y2: Y(t), stroke: css("--grid"), "stroke-width": 1 }, svg);
+    text(svg, m.l - 6, Y(t) + 4, yFormat(t), { "text-anchor": "end" });
+  }
+  if (refY != null) svgEl("line", { x1: m.l, x2: width - m.r, y1: Y(refY), y2: Y(refY), stroke: css("--axis"), "stroke-width": 1 }, svg);
+  const xt = xTicks || niceTicks(x0, x0 + (n - 1) * xStep, Math.max(2, Math.floor(width / 110)));
+  for (const t of xt) {
+    const i = (t - x0) / xStep;
+    if (i < 0 || i > n - 1) continue;
+    text(svg, X(i), height - 8, xFormat(t), { "text-anchor": "middle" });
+  }
+  svgEl("line", { x1: m.l, x2: width - m.r, y1: height - m.b, y2: height - m.b, stroke: css("--axis"), "stroke-width": 1 }, svg);
+  for (const s of series) {
+    let d = "", pen = false;
+    s.values.forEach((v, i) => {
+      if (v == null) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true;
+    });
+    svgEl("path", { d, fill: "none", stroke: s.color, "stroke-width": s.width || 2, "stroke-linejoin": "round", "stroke-linecap": "round", opacity: s.opacity || 1 }, svg);
+  }
+  for (const mk of markers) {
+    const i = (mk.x - x0) / xStep;
+    const cx = X(i), cy = Y(mk.y);
+    svgEl("circle", { cx, cy, r: 5, fill: mk.color, stroke: css("--surface"), "stroke-width": 2 }, svg);
+    const anchor = cx > width * 0.7 ? "end" : "start";
+    text(svg, cx + (anchor === "end" ? -10 : 10), cy + (mk.dy ?? -8), mk.label, { class: "label-strong", "text-anchor": anchor });
+  }
+  // crosshair
+  const cross = svgEl("line", { y1: m.t, y2: height - m.b, stroke: css("--axis"), "stroke-width": 1, opacity: 0 }, svg);
+  const dots = series.map((s) => svgEl("circle", { r: 4, fill: s.color, stroke: css("--surface"), "stroke-width": 2, opacity: 0 }, svg));
+  const tip = tooltip(mount);
+  const hit = svgEl("rect", { x: m.l, y: m.t, width: width - m.l - m.r, height: height - m.t - m.b, fill: "transparent" }, svg);
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * (width / r.width);
+    const i = Math.round(((px - m.l) / (width - m.l - m.r)) * (n - 1));
+    if (i < 0 || i > n - 1) return;
+    cross.setAttribute("x1", X(i)); cross.setAttribute("x2", X(i)); cross.setAttribute("opacity", 1);
+    const rows = [];
+    series.forEach((s, k) => {
+      const v = s.values[i];
+      if (v == null) { dots[k].setAttribute("opacity", 0); return; }
+      dots[k].setAttribute("cx", X(i)); dots[k].setAttribute("cy", Y(v)); dots[k].setAttribute("opacity", 1);
+      rows.push({ color: s.color, value: yFormat(v), label: s.name });
+    });
+    tip.show(X(i) * (r.width / width), Y(rows.length ? series.find((s) => s.values[i] != null).values[i] : lo) * (r.height / height), rows, xFormat(x0 + i * xStep));
+  };
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("opacity", 0); dots.forEach((d) => d.setAttribute("opacity", 0)); tip.hide(); });
+}
+
+// Horizontal dot/bar chart. rows: [{label, value, color, group}]
+function barChart(mount, { rows, xFormat = (v) => fmt(v), unit = "", refX, refLabel, domain, rowH = 30, dots = false, logTicks }) {
+  mount.replaceChildren();
+  const width = mount.clientWidth;
+  const labelW = Math.min(190, width * 0.4);
+  const m = { t: refLabel ? 22 : 8, r: 52, b: 24, l: labelW };
+  const height = m.t + m.b + rows.length * rowH;
+  const vals = rows.map((r) => r.value).concat(refX != null ? [refX] : []);
+  const [lo, hi] = domain || [0, Math.max(...vals) * 1.08];
+  const tf = logTicks ? Math.log2 : (v) => v;  // log axis for ratios
+  const X = (v) => m.l + ((tf(v) - tf(lo)) / (tf(hi) - tf(lo))) * (width - m.l - m.r);
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, height, role: "img" }, mount);
+  for (const t of logTicks || niceTicks(lo, hi, Math.max(3, Math.floor((width - m.l) / 90)))) {
+    svgEl("line", { x1: X(t), x2: X(t), y1: m.t, y2: height - m.b, stroke: css("--grid"), "stroke-width": 1 }, svg);
+    text(svg, X(t), height - 6, xFormat(t), { "text-anchor": "middle" });
+  }
+  if (refX != null) {
+    svgEl("line", { x1: X(refX), x2: X(refX), y1: m.t - 4, y2: height - m.b, stroke: css("--ink-2"), "stroke-width": 1.5 }, svg);
+    if (refLabel) text(svg, X(refX), m.t - 10, refLabel, { class: "label-2", "text-anchor": "middle" });
+  }
+  const tip = tooltip(mount);
+  rows.forEach((r, i) => {
+    const cy = m.t + i * rowH + rowH / 2;
+    text(svg, m.l - 10, cy + 4, r.label, { "text-anchor": "end", class: r.strong ? "label-strong" : "label-2" });
+    let mark;
+    if (dots) {
+      svgEl("line", { x1: X(refX ?? lo), x2: X(r.value), y1: cy, y2: cy, stroke: css("--grid"), "stroke-width": 2 }, svg);
+      mark = svgEl("circle", { cx: X(r.value), cy, r: 5.5, fill: r.color, stroke: css("--surface"), "stroke-width": 2 }, svg);
+    } else {
+      const x0 = X(lo), w = Math.max(2, X(r.value) - x0), h = Math.min(18, rowH - 10), rad = Math.min(4, w / 2);
+      const y0 = cy - h / 2;
+      mark = svgEl("path", { d: `M${x0},${y0}H${x0 + w - rad}Q${x0 + w},${y0} ${x0 + w},${y0 + rad}V${y0 + h - rad}Q${x0 + w},${y0 + h} ${x0 + w - rad},${y0 + h}H${x0}Z`, fill: r.color }, svg);
+    }
+    const label = xFormat(r.value) + unit;
+    const leftOfRef = dots && refX != null && r.value < refX;
+    const fitsLeft = X(r.value) - 10 - label.length * 7 > m.l + 4;  // ~7px per character at 11.5px
+    let lx = X(r.value) + (dots ? 10 : 6), anchor = "start";
+    if (leftOfRef && fitsLeft) { lx = X(r.value) - 10; anchor = "end"; }
+    else if (leftOfRef) lx = X(refX) + 8;  // no room on the left: sit just right of the reference line
+    text(svg, lx, cy + 4, label, { class: "label-2", "text-anchor": anchor });
+    const hit = svgEl("rect", { x: 0, y: cy - rowH / 2, width, height: rowH, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", (ev) => {
+      const box = mount.getBoundingClientRect();
+      tip.show(ev.clientX - box.left, ev.clientY - box.top, [{ color: r.color, value: xFormat(r.value) + unit, label: r.tip || r.label }]);
+    });
+    hit.addEventListener("pointerleave", () => tip.hide());
+  });
+}
+
+// Histogram of ratios on a log-2 axis, one row per group (small multiples)
+function ratioHistogram(mount, { groups, color }) {
+  mount.replaceChildren();
+  const width = mount.clientWidth;
+  const m = { t: 6, r: 14, b: 26, l: 74 };
+  const lo = Math.log2(0.5), hi = Math.log2(2.5), bins = 30;
+  const bw = (hi - lo) / bins;
+  const rowH = 70;
+  const height = m.t + m.b + groups.length * rowH;
+  const X = (lv) => m.l + ((lv - lo) / (hi - lo)) * (width - m.l - m.r);
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, height, role: "img" }, mount);
+  for (const t of [0.5, 0.75, 1, 1.5, 2]) {
+    svgEl("line", { x1: X(Math.log2(t)), x2: X(Math.log2(t)), y1: m.t, y2: height - m.b, stroke: t === 1 ? css("--ink-2") : css("--grid"), "stroke-width": t === 1 ? 1.5 : 1 }, svg);
+    text(svg, X(Math.log2(t)), height - 8, t + "×", { "text-anchor": "middle", class: t === 1 ? "label-strong" : "" });
+  }
+  const tip = tooltip(mount);
+  groups.forEach((g, gi) => {
+    const counts = new Array(bins).fill(0);
+    for (const v of g.values) {
+      const lv = Math.min(hi - 1e-9, Math.max(lo, Math.log2(v)));
+      counts[Math.floor((lv - lo) / bw)]++;
+    }
+    const top = m.t + gi * rowH, base = top + rowH - 10;
+    const maxC = Math.max(...counts);
+    text(svg, m.l - 10, base - 4, g.name, { "text-anchor": "end", class: "label-strong" });
+    text(svg, m.l - 10, base + 9, `${g.values.length} pairs`, { "text-anchor": "end" });
+    svgEl("line", { x1: m.l, x2: width - m.r, y1: base, y2: base, stroke: css("--axis"), "stroke-width": 1 }, svg);
+    counts.forEach((c, i) => {
+      if (!c) return;
+      const x0 = X(lo + i * bw) + 1, w = X(lo + (i + 1) * bw) - X(lo + i * bw) - 2;
+      const h = (c / maxC) * (rowH - 18), rad = Math.min(3, h / 2, w / 2);
+      const bar = svgEl("path", { d: `M${x0},${base}V${base - h + rad}Q${x0},${base - h} ${x0 + rad},${base - h}H${x0 + w - rad}Q${x0 + w},${base - h} ${x0 + w},${base - h + rad}V${base}Z`, fill: color }, svg);
+      const a = Math.pow(2, lo + i * bw), b = Math.pow(2, lo + (i + 1) * bw);
+      bar.addEventListener("pointermove", (ev) => {
+        const box = mount.getBoundingClientRect();
+        tip.show(ev.clientX - box.left, ev.clientY - box.top, [{ color, value: `${c}`, label: `OD pairs with ratio ${a.toFixed(2)}–${b.toFixed(2)}×` }], g.name);
+      });
+      bar.addEventListener("pointerleave", () => tip.hide());
+    });
+  });
+}
+
+function statTiles(mount, tiles) {
+  mount.replaceChildren();
+  for (const t of tiles) {
+    const d = document.createElement("div"); d.className = "stat";
+    const v = document.createElement("div"); v.className = "value"; v.textContent = t.value;
+    const l = document.createElement("div"); l.className = "label"; l.textContent = t.label;
+    d.append(v, l); mount.appendChild(d);
+  }
+}
+
+function table(mount, head, rows, numeric = []) {
+  mount.replaceChildren();
+  const thead = document.createElement("thead"), tr = document.createElement("tr");
+  head.forEach((h, i) => { const th = document.createElement("th"); th.textContent = h; if (numeric.includes(i)) th.className = "num"; tr.appendChild(th); });
+  thead.appendChild(tr); mount.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  for (const r of rows) {
+    const row = document.createElement("tr");
+    r.forEach((c, i) => {
+      const td = document.createElement("td");
+      if (c && typeof c === "object") { const s = document.createElement("span"); s.className = `verdict ${c.cls}`; s.textContent = c.text; td.appendChild(s); }
+      else td.textContent = c;
+      if (numeric.includes(i)) td.className = "num";
+      row.appendChild(td);
+    });
+    tbody.appendChild(row);
+  }
+  mount.appendChild(tbody);
+}
+
+function dataTable(after, head, rows) {
+  const det = document.createElement("details");
+  const sum = document.createElement("summary"); sum.textContent = "Show values as a table";
+  const t = document.createElement("table");
+  det.append(sum, t);
+  after.insertAdjacentElement("afterend", det);
+  table(t, head, rows, head.map((_, i) => i).slice(1));
+}
+
+// ---------- seeded AR(1) toy ----------
+function arSeries(phi, n, seed = 7) {
+  let s = seed >>> 0;
+  const rand = () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const gauss = () => Math.sqrt(-2 * Math.log(rand() + 1e-12)) * Math.cos(2 * Math.PI * rand());
+  const out = [0];
+  for (let i = 1; i < n; i++) out.push(phi * out[i - 1] + Math.sqrt(1 - phi * phi) * gauss());
+  return out;
+}
+function r2(y, p) {
+  let mean = 0, n = 0;
+  for (let i = 0; i < y.length; i++) if (p[i] != null) { mean += y[i]; n++; }
+  mean /= n;
+  let sse = 0, sst = 0;
+  for (let i = 0; i < y.length; i++) if (p[i] != null) { sse += (y[i] - p[i]) ** 2; sst += (y[i] - mean) ** 2; }
+  return 1 - sse / sst;
+}
+
+const renderers = [];
+function onRender(fn) { renderers.push(fn); fn(); }
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => renderers.forEach((f) => f()), 120); });
+
+function renderAR() {
+  const phi = +document.getElementById("phi").value;
+  document.getElementById("phi-val").textContent = phi.toFixed(2);
+  const long = arSeries(phi, 4000);
+  const persist = [null, ...long.slice(0, -1)];
+  document.getElementById("phi-r2").textContent = r2(long, persist).toFixed(2);
+  const shown = long.slice(0, 160);
+  lineChart(document.getElementById("chart-ar"), {
+    height: 200,
+    series: [
+      { name: "Series", values: shown, color: css("--ink"), width: 1.6 },
+      { name: "Persistence (previous value)", values: [null, ...shown.slice(0, -1)], color: css("--baseline"), width: 1.6, opacity: 0.9 },
+    ],
+    yDomain: [-3.2, 3.2], yFormat: (v) => fmt(v, 1), xFormat: (v) => `t=${v}`,
+  });
+}
+document.getElementById("phi").addEventListener("input", renderAR);
+onRender(renderAR);
+
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  renderers.forEach((f) => f());
+});
+
+// ---------- data-driven sections ----------
+const load = (name) => fetch(`data/${name}.json`).then((r) => { if (!r.ok) throw new Error(name); return r.json(); });
+
+Promise.all(["case01", "case02", "case04", "summary"].map(load)).then(([c01, c02, c04, sum]) => {
+  const c03 = sum.case03, c05 = sum.case05;
+  const nOd = Object.values(c03.tally).reduce((a, t) => a + (t.PASS || 0) + (t.WARN || 0) + (t.FAIL || 0), 0);
+  const nPass = Object.values(c03.tally).reduce((a, t) => a + (t.PASS || 0), 0);
+
+  onRender(() => statTiles(document.getElementById("hero-stats"), [
+    { value: "4 of 5", label: "audited results don't clearly beat a trivial baseline" },
+    { value: `${Math.round((c04.rmse.BiLSTM / c04.rmse.seasonal) * 10) / 10}×`, label: "more error than \"one loop ago\" (ICC 2021 paper, showcased flow)" },
+    { value: `${Math.round((nPass / nOd) * 100)}%`, label: `of ${nOd} retrained per-flow LSTMs beat every trivial baseline (ISCC 2019 code)` },
+  ]));
+
+  // case 01
+  const agree = c01.congested.slice(1).filter((v, i) => v === c01.congested[i]).length / (c01.congested.length - 1);
+  document.getElementById("case01-sub").textContent =
+    `Switch ${c01.port[0]}, port ${c01.port[1]}: the 400-step stretch with the most state changes. The next label equals the current one ${Math.round(agree * 100)}% of the time.`;
+  onRender(() => lineChart(document.getElementById("chart-case01-strip"), {
+    height: 200,
+    series: [
+      { name: "Latency (ms)", values: c01.latency_ms, color: css("--model"), width: 1.6 },
+      { name: "Threshold", values: c01.latency_ms.map(() => 100), color: css("--baseline"), width: 1.5 },
+    ],
+    yFormat: (v) => fmt(v, 0), xFormat: (v) => `step ${v}`,
+  }));
+  const r01 = c01.results;
+  const f1Rows = [
+    { label: "Shuffled split: model", value: r01.split_shuffled.model_f1, color: css("--model") },
+    { label: "Shuffled split: baseline", value: r01.split_shuffled.best_baseline_f1, color: css("--baseline"), tip: r01.split_shuffled.best_baseline },
+    { label: "Time split: model", value: r01.split_chrono.model_f1, color: css("--model"), strong: true },
+    { label: "Time split: baseline", value: r01.split_chrono.best_baseline_f1, color: css("--baseline"), strong: true, tip: r01.split_chrono.best_baseline },
+  ];
+  onRender(() => barChart(document.getElementById("chart-case01-f1"), { rows: f1Rows, domain: [0.97, 1.0], xFormat: (v) => v.toFixed(3), dots: true }));
+  dataTable(document.getElementById("chart-case01-f1"), ["Split / forecaster", "F1"], f1Rows.map((r) => [r.label, r.value.toFixed(4)]));
+
+  // case 04
+  onRender(() => lineChart(document.getElementById("chart-acf"), {
+    height: 200, x0: 1, xFormat: (v) => `${v} min`, yFormat: (v) => fmt(v, 1), refY: 0,
+    series: [{ name: "Autocorrelation", values: c04.acf, color: css("--model") }],
+    markers: [
+      { x: 1, y: c04.acf[0], color: css("--model"), label: `lag 1: ${c04.acf[0].toFixed(2)}`, dy: -26 },
+      { x: c04.season, y: c04.acf[c04.season - 1], color: css("--model"), label: `replay period ${c04.season} min: ${c04.acf[c04.season - 1].toFixed(2)}` },
+    ],
+  }));
+  let windowN = 120;
+  const hourTicks = (n) => {
+    const step = [30, 60, 120, 240, 480].find((s) => n / s <= 6);
+    const out = [];
+    for (let t = 0; t < n; t += step) out.push(t);
+    return out;
+  };
+  const drawCase04 = () => {
+    const n = windowN || c04.y.length;
+    lineChart(document.getElementById("chart-case04"), {
+      height: 280, xFormat: (v) => `${Math.floor(v / 60)}h ${String(v % 60).padStart(2, "0")}m`, yFormat: (v) => fmt(v, 2),
+      xTicks: hourTicks(n),
+      series: [
+        { name: "BiLSTM", values: c04.bilstm.slice(0, n), color: css("--model"), width: 1.8 },
+        { name: "One loop ago", values: c04.seasonal.slice(0, n), color: css("--baseline"), width: 1.8 },
+        { name: "Actual", values: c04.y.slice(0, n), color: css("--ink"), width: 1.2 },
+      ],
+    });
+  };
+  document.querySelectorAll("#case04-window button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("#case04-window button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    windowN = +b.dataset.n; drawCase04();
+  }));
+  onRender(drawCase04);
+  const rmseRows = [
+    { label: `Same value one loop ago (${c04.season} min)`, value: c04.rmse.seasonal, color: css("--baseline"), strong: true },
+    { label: "BiLSTM (paper's best)", value: c04.rmse.BiLSTM, color: css("--model"), strong: true },
+    { label: "GRU", value: c04.rmse.GRU, color: css("--model") },
+    { label: "Vanilla LSTM", value: c04.rmse["Vanilla LSTM"], color: css("--model") },
+    { label: "Training mean", value: c04.rmse.mean, color: css("--baseline") },
+    { label: "Persistence", value: c04.rmse.persistence, color: css("--baseline") },
+  ];
+  onRender(() => barChart(document.getElementById("chart-case04-rmse"), { rows: rmseRows, xFormat: (v) => v.toFixed(3) }));
+  dataTable(document.getElementById("chart-case04-rmse"), ["Forecaster", "RMSE"], rmseRows.map((r) => [r.label, r.value.toFixed(4)]));
+  const odRows = c04.per_od || sum.case04.per_od;
+  const ods = odRows.map((r) => ({ ...r, ratio: r.rmse / r.baseline_rmse })).sort((a, b) => a.ratio - b.ratio);
+  const odChartRows = ods.map((r) => ({
+    label: `OD ${r.od}${r.od === 52 ? " (notebook)" : ""}`, value: r.ratio, color: css("--model"), strong: r.od === 52,
+    tip: `BiLSTM ${r.rmse.toFixed(3)} vs ${r.best_baseline} ${r.baseline_rmse.toFixed(3)}`,
+  }));
+  onRender(() => barChart(document.getElementById("chart-case04-ods"), {
+    rows: odChartRows, dots: true, refX: 1, refLabel: "1× = as good as the baseline", unit: "×", rowH: 26,
+    domain: [0.5, 6], logTicks: [0.5, 1, 2, 4], xFormat: (v) => (v < 1 ? v.toFixed(2) : v.toFixed(1)),
+  }));
+  dataTable(document.getElementById("chart-case04-ods"), ["OD pair", "BiLSTM RMSE", "Best baseline RMSE", "Ratio"],
+    ods.map((r) => [`OD ${r.od} (${r.best_baseline})`, r.rmse.toFixed(4), r.baseline_rmse.toFixed(4), r.ratio.toFixed(2) + "×"]));
+
+  // case 03
+  const names = { abilene: "Abilene", geant: "GÉANT", cernet: "CERNET" };
+  onRender(() => ratioHistogram(document.getElementById("chart-case03"), {
+    color: css("--model"),
+    groups: Object.keys(names).map((k) => ({ name: names[k], values: c03.ratio_vs_persistence[k] })),
+  }));
+  const better = Object.values(c03.ratio_vs_persistence).flat().filter((v) => v < 1).length;
+  const total = Object.values(c03.ratio_vs_persistence).flat().length;
+  document.getElementById("case03-caption").textContent =
+    `${better} of ${total} OD pairs have a lower error than persistence at all, and only ${nPass} beat every trivial baseline with a confidence interval clear of zero. Ratios are clipped to 0.5–2.5× for display; ${Object.values(c03.inactive_in_test).reduce((a, b) => a + b, 0)} pairs that carry no traffic during the test period are left out.`;
+  table(document.getElementById("case03-table"), ["Network", "LSTM MAE", "Linear AR(10)", "Persistence", "LSTM vs persistence"],
+    Object.keys(names).map((k) => {
+      const p = c03.pooled_mae[k];
+      return [names[k], fmt(p.lstm, 0), fmt(p.ar, 0), fmt(p.persistence, 0), { cls: "fail", text: `${Math.round((p.lstm / p.persistence - 1) * 100)}% worse` }];
+    }), [1, 2, 3]);
+
+  // case 05
+  const c05Rows = [];
+  for (const [ds, v] of Object.entries(c05)) {
+    c05Rows.push({ label: `${ds}: reported LSTM`, value: v.reported_rmse, color: css("--model"), strong: true });
+    c05Rows.push({ label: `${ds}: persistence`, value: v.persistence, color: css("--baseline") });
+    c05Rows.push({ label: `${ds}: moving avg (3)`, value: v["moving average (3)"], color: css("--baseline") });
+  }
+  onRender(() => barChart(document.getElementById("chart-case05"), { rows: c05Rows, xFormat: (v) => v.toFixed(3) }));
+  dataTable(document.getElementById("chart-case05"), ["Dataset / forecaster", "RMSE"], c05Rows.map((r) => [r.label, r.value.toFixed(4)]));
+
+  // case 02
+  onRender(() => lineChart(document.getElementById("chart-case02"), {
+    height: 260, xFormat: (v) => `${String(Math.floor((v * 5) / 60)).padStart(2, "0")}:${String((v * 5) % 60).padStart(2, "0")}`,
+    yFormat: (v) => fmt(v, 0), xTicks: [0, 72, 144, 216, 287],
+    series: [
+      { name: "Actual", values: c02.y.slice(0, 288), color: css("--ink"), width: 1.4 },
+      { name: "SAEs", values: c02.model.slice(0, 288), color: css("--model"), width: 1.6 },
+      { name: "Persistence", values: c02.persistence.slice(0, 288), color: css("--baseline"), width: 1.6 },
+    ],
+  }));
+  const s02 = c02.scores;
+  onRender(() => statTiles(document.getElementById("case02-stats"), [
+    { value: fmt(s02.SAEs.mae, 2), label: "SAEs MAE (vehicles / 5 min)" },
+    { value: fmt(s02["moving average (3)"].mae, 2), label: "3-step moving average MAE" },
+    { value: `${fmt(s02.SAEs.r2, 3)} vs ${fmt(s02.persistence.r2, 3)}`, label: "R²: model vs persistence" },
+  ]));
+
+  // scoreboard
+  table(document.getElementById("scoreboard"), ["#", "Result", "Verdict", "Finding"], [
+    ["01", "Predictive_Activation v0 (my course project)", { cls: "fail", text: "FAIL" }, "Shuffled split hid it; time-split model loses to a 3-step moving average."],
+    ["02", "xiaochus/TrafficFlowPrediction (681★)", { cls: "pass", text: "Holds up" }, "Beats baselines by 8–10% MAE; headline R² mostly autocorrelation."],
+    ["03", "Traffic-Matrix-Prediction (ISCC 2019)", { cls: "fail", text: "FAIL" }, "LSTM 11–21% worse than persistence on all three backbones."],
+    ["04", "SDN-TMprediction (ICC 2021)", { cls: "fail", text: "FAIL" }, "Replay-loop baseline wins on 9 of 13 flows; 2.4× better on the showcased one."],
+    ["05", "Annongkhanh/Traffic-matrix-prediction", { cls: "fail", text: "FAIL" }, "Reported error higher than persistence on both datasets."],
+  ]);
+}).catch((err) => {
+  const p = document.createElement("p");
+  p.textContent = "The charts could not load their data (" + err.message + "). Serve this folder over HTTP, e.g. python -m http.server.";
+  document.querySelector("main").prepend(p);
+});
+})();
+</script>
+</body>
+</html>

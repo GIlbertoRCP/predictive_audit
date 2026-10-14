@@ -27,9 +27,10 @@ from torch import nn
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parent))
+from _export import write as export_json  # noqa: E402
 from _fetch import fetch  # noqa: E402
 
-from predictive_audit import audit, report  # noqa: E402
+from predictive_audit import audit, baselines, report  # noqa: E402
 
 REPO = "duchuyle108/SDN-TMprediction"
 COMMIT = "986c8689cc19c2cab5f9dfb3c2ef8b52a54a2fb7"
@@ -165,6 +166,28 @@ def run_od(df, od, epochs, seed):
     return frame, rmse, losses
 
 
+def export(frame, od, rmse):
+    """Test-period series for the explorer: actual, BiLSTM, replay-loop baseline, and the training ACF."""
+    fit = frame["split"] != "test"
+    season = baselines.estimate_season(frame["y"], None, fit)
+    seasonal = baselines.seasonal_naive(frame["y"], None, 1, season)
+    test = frame["split"] == "test"
+    train = frame.loc[frame["split"] == "train", "y"].to_numpy()
+    centered = train - train.mean()
+    acf = [float(centered[:-k] @ centered[k:] / (centered @ centered)) for k in range(1, 601)]
+    persistence = frame["y"].shift(1)
+    y = frame.loc[test, "y"].to_numpy()
+    path = export_json("case04", {
+        "od": od, "season": season, "minutes_per_step": 1,
+        "rmse": {**rmse, "seasonal": float(np.sqrt(np.mean((y - seasonal[test].to_numpy()) ** 2))),
+                 "persistence": float(np.sqrt(np.mean((y - persistence[test].to_numpy()) ** 2))),
+                 "mean": float(np.sqrt(np.mean((y - train.mean()) ** 2)))},
+        "y": y, "bilstm": frame.loc[test, "BiLSTM"].to_numpy(), "seasonal": seasonal[test].to_numpy(),
+        "acf": acf,
+    })
+    print(f"exported {path}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ods", default="52", help="comma-separated column indices (the notebook uses 52), or 'sample'")
@@ -172,6 +195,7 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="RESULTS.md")
+    ap.add_argument("--export", action="store_true", help="write site/data/case04.json for the first OD")
     args = ap.parse_args()
 
     path = fetch(REPO, COMMIT, DATA[0], DATA[1], HERE / ".cache")
@@ -186,6 +210,8 @@ def main() -> None:
         ods = [int(o) for o in args.ods.split(",")]
     for od in ods:
         frame, rmse, losses = run_od(df, od, args.epochs, args.seed)
+        if args.export and od == ods[0]:
+            export(frame, od, rmse)
         print(f"OD {od} final train/val MSE: " + ", ".join(f"{k} {a:.4f}/{b:.4f}" for k, (a, b) in losses.items()))
         sections += [f"## OD column {od}", "", "Scaled RMSE (the paper's metric): "
                      + ", ".join(f"{k} {v:.4f}" for k, v in rmse.items()), "",

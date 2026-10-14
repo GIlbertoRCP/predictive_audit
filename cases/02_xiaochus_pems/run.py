@@ -17,6 +17,7 @@ import pandas as pd
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parent))
+from _export import write as export_json  # noqa: E402
 from _fetch import fetch_all  # noqa: E402
 
 from predictive_audit import audit, report  # noqa: E402
@@ -192,6 +193,20 @@ def main() -> None:
             sections += ["", f"## {name}, headline metric {metric.upper()}", "", report.to_markdown(result)]
 
     (HERE / "RESULTS.md").write_text("\n".join(sections) + "\n")
+    if "--export" in sys.argv:
+        scored = df.iloc[LAG:]
+        y = scored["flow"].to_numpy()
+        persistence = df["flow"].shift(1).iloc[LAG:].to_numpy()
+        ma3 = df["flow"].shift(1).rolling(3).mean().iloc[LAG:].to_numpy()
+        r2 = lambda p: 1 - np.nansum((y - p) ** 2) / np.sum((y - y.mean()) ** 2)  # noqa: E731
+        mae = lambda p: float(np.nanmean(np.abs(y - p)))  # noqa: E731
+        print("exported", export_json("case02", {
+            "reported": REPORTED["SAEs"],
+            "scores": {name: {"mae": round(mae(p), 4), "r2": round(float(r2(p)), 4)} for name, p in
+                       [("SAEs", scored["SAEs"].to_numpy()), ("persistence", persistence), ("moving average (3)", ma3)]},
+            "minutes_per_step": 5,
+            "y": y[:864], "model": scored["SAEs"].to_numpy()[:864], "persistence": persistence[:864],
+        }))
     print(f"\nwrote {HERE / 'RESULTS.md'}")
 
 

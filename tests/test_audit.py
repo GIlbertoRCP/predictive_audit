@@ -165,6 +165,16 @@ def test_wide_to_long_audits_each_column_as_its_own_series():
     assert r.n_eval == 40
 
 
+def test_constant_test_period_is_not_a_model_failure():
+    """A link that goes silent during the test period: persistence is trivially perfect."""
+    y = np.r_[np.random.default_rng(11).normal(10, 2, 800), np.zeros(200)]
+    df = frame_from_series(y)
+    df["split"] = np.where(np.arange(len(df)) < 800, "train", "test")
+    df["pred"] = 0.01
+    r = audit(df, "target", task="regression", pred="pred", split="split")
+    assert {c.name: c for c in r.checks}["beats trivial baselines"].status == "INFO"
+
+
 def test_input_validation():
     df = frame_from_series(sticky_labels(100))
     with pytest.raises(ValueError, match="columns not found"):

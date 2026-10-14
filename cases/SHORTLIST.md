@@ -3,7 +3,7 @@
 Goal: 10–15 public network / systems forecasting results, audited the same way as case 01.
 Status: **approved 2026-10-13.** Third-party data is never committed; each case fetches it, pinned and checksummed, into a gitignored `.cache/`.
 
-Progress: 02, 04, 05 done · 03, 06–10 to do.
+Progress: 02, 03, 04, 05 done · 06–10 to do.
 
 ## Audit tiers
 
@@ -17,7 +17,7 @@ Progress: 02, 04, 05 done · 03, 06–10 to do.
 | # | Repo | Domain | Data in repo? | Claim to check | Tier | Notes |
 |---|---|---|---|---|---|---|
 | 02 ✅ | [xiaochus/TrafficFlowPrediction](https://github.com/xiaochus/TrafficFlowPrediction) (681★) | Road traffic (PeMS), LSTM/GRU/SAEs | yes (train/test CSV + trained .h5) | MAE 7.06–7.21, R² 0.94 | R done, F possible | **Spot-checked:** model beats a 3-step moving average (MAE 7.06 vs 7.77); the headline R² is mostly autocorrelation (moving average alone: 0.93). Adjacent domain, but very visible. Train set is shuffled *within* train only (fine). |
-| 03 | [THU-INSC-NAD/Traffic-Matrix-Prediction](https://github.com/THU-INSC-NAD/Traffic-Matrix-Prediction) | Traffic matrices: Abilene, GÉANT, CERNET; LSTM/GRU/TCN/DBN | yes (OD-pair CSVs, ~100 MB) | Paper tables (ISSCC 2019) | F | Result files were removed from the repo, so retrain (PyTorch). Min-max scaler fit on the full series before splitting (mild leakage to note). Three networks in one case. |
+| 03 ✅ | [THU-INSC-NAD/Traffic-Matrix-Prediction](https://github.com/THU-INSC-NAD/Traffic-Matrix-Prediction) | Traffic matrices: Abilene, GÉANT, CERNET; LSTM/GRU/TCN/DBN | yes (OD-pair CSVs, ~100 MB) | Paper tables (ISSCC 2019) | F | Result files were removed from the repo, so retrain (PyTorch). Min-max scaler fit on the full series before splitting (mild leakage to note). Three networks in one case. |
 | 04 ✅ | [duchuyle108/SDN-TMprediction](https://github.com/duchuyle108/SDN-TMprediction) | GÉANT TMs + Mininet testbed TMs; ICC 2021 paper | yes (48 MB + 6 MB) | Paper's prediction error | R then F | Same Mininet/POX setting as your old project, so it makes a strong narrative pair with case 01. |
 | 05 ✅ | [Annongkhanh/Traffic-matrix-prediction](https://github.com/Annongkhanh/Traffic-matrix-prediction) | GÉANT + Mininet Zamren; LSTM | yes (small) | Notebook outputs | F | Small and Colab-based; quick to rerun. |
 | 06 | [chuanting/STDenseNet](https://github.com/chuanting/STDenseNet) | Milan cellular traffic (Telecom Italia); IEEE Comm. Letters 2018 | yes (h5, 24 MB) | Paper RMSE/MAE | R | Well-cited paper; the Milan grid is the standard cellular benchmark. Has daily/weekly seasonality, so seasonal-naive matters here. |
@@ -25,6 +25,12 @@ Progress: 02, 04, 05 done · 03, 06–10 to do.
 | 08 | [CN-UPB/ml-traffic-prediction](https://github.com/CN-UPB/ml-traffic-prediction) | GÉANT / TOTEM link traffic; master's thesis | results only (data from TOTEM) | LSTM vs ARIMA results tables | R | University lab; a thesis has explicit evaluation tables. |
 | 09 | [BiswajitPadhi99/…Azure…](https://github.com/BiswajitPadhi99/predicting-cloud-CPU-utilization-on-Azure-dataset-using-deeplearning) | Azure VM CPU utilization; LSTM/GRU/IndRNN | yes (650 KB) | Notebook metrics | F | Systems rather than networking; cloud workload forecasting has the same failure modes. |
 | 10 | [xdbdilab/APM](https://github.com/xdbdilab/APM) | Alibaba 2018 + Google 2019 cluster traces | yes | Paper ("accurate prediction of cloud workloads") | R then F | Published paper with real production traces. |
+
+## Stretch candidates (found during case 03)
+
+- **[Improving Internet Traffic Matrix Prediction via Time Series Clustering](https://arxiv.org/html/2509.15072v1)** (arXiv 2025):
+  claims up to 92% lower RMSE on Abilene and 75% on GÉANT than existing methods. Claims that large are worth checking
+  against persistence; needs code/data availability checked first.
 
 ## Not pursued (and why)
 

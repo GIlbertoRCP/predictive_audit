@@ -12,6 +12,7 @@ the case is the evaluation protocol, not the architecture.
     uv run python cases/01_predictive_activation_lstm/run.py
 """
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,9 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from predictive_audit import audit, report
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from _export import write as export_json  # noqa: E402
 
 HERE = Path(__file__).parent
 FEATURES = ["rx_mbps", "tx_mbps", "rx_loss", "tx_loss", "avg_queue_depth", "latency_ms"]
@@ -58,6 +62,7 @@ def main() -> None:
     position = df.groupby(GROUPS).cumcount() / df.groupby(GROUPS)["timestamp"].transform("size")
     df["split_chrono"] = np.where(position < 0.8, "train", "test")
 
+    results = {}
     sections = ["# Case 01: Predictive_Activation v0 congestion forecaster", ""]
     for split, title in [
         ("split_shuffled", "A. Original protocol (shuffled 80/20 split)"),
@@ -76,10 +81,28 @@ def main() -> None:
             metric="f1",
         )
         print(f"\n=== {title} ===\n{report.to_text(result)}")
+        results[split] = {"model_f1": result.table["GBM (LSTM stand-in)"]["f1"],
+                          "persistence_f1": result.table["persistence"]["f1"],
+                          "best_baseline": result.best_baseline,
+                          "best_baseline_f1": result.table[result.best_baseline]["f1"],
+                          "verdict": result.verdict}
         sections += [f"## {title}", "", report.to_markdown(result), ""]
 
     (HERE / "RESULTS.md").write_text("\n".join(sections))
     print(f"\nwrote {HERE / 'RESULTS.md'}")
+    if "--export" in sys.argv:
+        # the 400-step window (any port) where the label changes state most often, so both states show
+        best = None
+        for port, g in df.groupby(GROUPS):
+            flips = g["is_congested"].diff().abs().fillna(0).rolling(400).sum()
+            if flips.notna().any() and (best is None or flips.max() > best[0]):
+                end = g.index.get_loc(flips.idxmax())
+                best = (flips.max(), port, g.iloc[end - 399:end + 1])
+        _, port, one = best
+        print("exported", export_json("case01", {
+            "port": [int(port[0]), int(port[1])], "results": results,
+            "latency_ms": one["latency_ms"].to_numpy(), "congested": one["is_congested"].to_numpy(),
+        }))
 
 
 if __name__ == "__main__":

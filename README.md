@@ -13,6 +13,8 @@ before it means anything, and against the evaluation mistakes that make it look 
 | **Temporal split** | Shuffled train/test splits where test rows sit between training rows, so overlapping windows leak. |
 | **Feature leakage** | Feature columns that are near-copies of target values not yet observed at prediction time. |
 
+**Read the findings:** [write-up](docs/WRITEUP.md) · interactive explorer in [`site/`](site/) (see *Explorer* below)
+
 ## Why this exists
 
 My team's course project ([Predictive_Activation](https://github.com/GIlbertoRCP/Predictive_Activation), v0) reported a congestion forecaster with F1 ≈ 0.99.
@@ -28,6 +30,7 @@ caught it, so I can run them on other published results.
 
 | 02 | [xiaochus/TrafficFlowPrediction](cases/02_xiaochus_pems/) (681★), PeMS freeway flow, LSTM/GRU/SAEs | MAE 7.06–7.21, R² 0.94 | **holds up** (WARN) | Audited with the repo's own weights (reproduced to 2 decimals). Models beat a 3-step moving average by 8–10% MAE; the headline R² is mostly autocorrelation (persistence alone: 0.92). |
 
+| 03 | [THU-INSC-NAD/Traffic-Matrix-Prediction](cases/03_thu_traffic_matrix/) (ISCC 2019), per-OD LSTM on Abilene, GÉANT, CERNET | Deep-learning TM prediction for traffic engineering | **FAIL** | All 785 OD models retrained: the LSTM is 11–21% *worse* than persistence on every network and beats all trivial baselines on only 14% of OD pairs with test traffic. A linear AR(10) does better than the LSTM everywhere. |
 | 04 | [SDN-TMprediction](cases/04_sdn_tm_prediction/) (IEEE ICC 2021), LSTM/BiLSTM/GRU on a Mininet testbed | RNN variants compared only with each other | **FAIL** (9 of 13 series) | Testbed traffic is replayed pcaps, so it loops. "Same value one replay loop ago" beats the RNNs on 9 of 13 OD pairs, and is 2.4× more accurate on the notebook's showcased pair. |
 | 05 | [Annongkhanh/Traffic-matrix-prediction](cases/05_sdn_tm_lstm_geant_zamren/), LSTM on GÉANT + Mininet testbed | MSE 0.026 (GÉANT), 0.041 (testbed) | **FAIL** | Reported error is *higher* than a trivial baseline's on both datasets: on GÉANT, persistence alone has about 2.5× lower MSE. |
 
@@ -64,6 +67,20 @@ uv run pytest
 uv run python cases/01_predictive_activation_lstm/run.py
 uv run --group cases python cases/02_xiaochus_pems/run.py   # fetches pinned third-party data/weights
 ```
+
+## Explorer
+
+`site/` is a dependency-free static page that tells the story case by case, with charts built from the audit outputs.
+
+```bash
+uv run python cases/01_predictive_activation_lstm/run.py --export                 # site/data/case01.json
+uv run --group cases python cases/02_xiaochus_pems/run.py --export                # site/data/case02.json
+uv run --group cases python cases/04_sdn_tm_prediction/run.py --ods 52 --export   # site/data/case04.json
+uv run python site/build_data.py                                                  # site/data/summary.json (cases 03-05)
+python3 -m http.server 8791 --directory site                                      # view at localhost:8791
+```
+
+To host it, set **Settings → Pages → Source** to *GitHub Actions*; `.github/workflows/pages.yml` then publishes `site/` on every push to `main` that touches it.
 
 ## Limitations
 

@@ -179,6 +179,13 @@ def _label_memory(task, metric, y_true, persist, horizon) -> Check:
 
 
 def _beats_baselines(metric, y_true, model, baseline, baseline_name, block, n_boot, seed) -> Check:
+    if np.ptp(y_true) == 0:
+        return Check(
+            "beats trivial baselines",
+            "INFO",
+            f"The target is constant ({y_true[0]:g}) over the scored rows, so there is nothing to forecast.",
+            {"baseline": baseline_name},
+        )
     diff = metrics.score(metric, y_true, model) - metrics.score(metric, y_true, baseline)
     block = block or max(10, int(round(np.sqrt(len(y_true)))))
     lo, hi = metrics.block_bootstrap_diff(metric, y_true, model, baseline, block, n_boot, seed)
