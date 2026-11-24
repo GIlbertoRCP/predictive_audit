@@ -1,0 +1,9 @@
+{
+  "n_ods": 132,
+  "n_win": 800,
+  "epochs": 10,
+  "stacked_s": 5.707,
+  "sequential_s": 26.696,
+  "speedup_x": 4.68,
+  "max_abs_diff": 1.7881393432617188e-07
+}

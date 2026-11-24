@@ -1,7 +1,19 @@
 """predictive-audit: does a forecasting result beat 'tomorrow looks like today'?"""
 
-from .audit import AuditReport, Check, audit
+from . import baselines, metrics, report
+from .audit import SCHEMA_VERSION, AuditReport, BatchAuditReport, Check, audit, batch_audit
 from .reshape import wide_to_long
 
-__all__ = ["audit", "AuditReport", "Check", "wide_to_long"]
-__version__ = "0.1.0"
+__all__ = [
+    "AuditReport",
+    "BatchAuditReport",
+    "Check",
+    "SCHEMA_VERSION",
+    "audit",
+    "baselines",
+    "batch_audit",
+    "metrics",
+    "report",
+    "wide_to_long",
+]
+__version__ = "0.2.0"

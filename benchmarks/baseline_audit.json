@@ -1,0 +1,93 @@
+{
+  "env": {
+    "python": "3.13.5",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "numpy": "2.5.4",
+    "pandas": "3.0.6"
+  },
+  "single_series": [
+    {
+      "task": "regression",
+      "metric": "mae",
+      "n_rows": 10000,
+      "n_boot": 500,
+      "runs": 3,
+      "p50_ms": 42.62,
+      "p95_ms": 44.25,
+      "p99_ms": 44.4,
+      "throughput_rows_s": 234614,
+      "peak_mem_mb": 2.18
+    },
+    {
+      "task": "regression",
+      "metric": "mae",
+      "n_rows": 100000,
+      "n_boot": 500,
+      "runs": 3,
+      "p50_ms": 147.93,
+      "p95_ms": 168.89,
+      "p99_ms": 170.76,
+      "throughput_rows_s": 675997,
+      "peak_mem_mb": 20.88
+    },
+    {
+      "task": "regression",
+      "metric": "mae",
+      "n_rows": 500000,
+      "n_boot": 500,
+      "runs": 3,
+      "p50_ms": 609.28,
+      "p95_ms": 610.59,
+      "p99_ms": 610.71,
+      "throughput_rows_s": 820641,
+      "peak_mem_mb": 106.01
+    },
+    {
+      "task": "classification",
+      "metric": "f1",
+      "n_rows": 10000,
+      "n_boot": 500,
+      "runs": 3,
+      "p50_ms": 2675.91,
+      "p95_ms": 2695.61,
+      "p99_ms": 2697.37,
+      "throughput_rows_s": 3737,
+      "peak_mem_mb": 2.34
+    },
+    {
+      "task": "classification",
+      "metric": "f1",
+      "n_rows": 100000,
+      "n_boot": 500,
+      "runs": 3,
+      "p50_ms": 3624.69,
+      "p95_ms": 3628.94,
+      "p99_ms": 3629.32,
+      "throughput_rows_s": 27588,
+      "peak_mem_mb": 20.89
+    },
+    {
+      "task": "classification",
+      "metric": "f1",
+      "n_rows": 500000,
+      "n_boot": 500,
+      "runs": 3,
+      "p50_ms": 7789.39,
+      "p95_ms": 7834.64,
+      "p99_ms": 7838.67,
+      "throughput_rows_s": 64189,
+      "peak_mem_mb": 106.01
+    }
+  ],
+  "wide_panel_1m": {
+    "n_series": 500,
+    "n_steps": 2000,
+    "cells": 1000000,
+    "n_boot": 500,
+    "wide_to_long_ms": 198.96,
+    "wide_to_long_peak_mb": 56.58,
+    "panel_audit_ms": 1561.92,
+    "panel_audit_peak_mb": 259.4
+  }
+}

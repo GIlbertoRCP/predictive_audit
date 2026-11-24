@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import cast
+
+import numpy as np
 import pandas as pd
 
 
 def wide_to_long(
     df: pd.DataFrame,
-    columns: list[str] | None = None,
+    columns: Sequence[str] | None = None,
     *,
     time: str | None = None,
-    keep: list[str] | None = None,
+    keep: Sequence[str] | None = None,
     series_name: str = "series",
     value_name: str = "value",
 ) -> pd.DataFrame:
@@ -20,14 +24,25 @@ def wide_to_long(
     input row order, which is preserved in a ``step`` column so ``audit(time="step")``
     works even when the table has no usable timestamp. Columns in ``keep`` (such as a
     split label) are repeated for every series.
+
+    Vectorized in NumPy to avoid O(n_series) intermediate DataFrame copies while
+    preserving exact column-by-column stacking order.
     """
-    keep = list(keep or [])
-    fixed = keep + ([time] if time else [])
-    columns = list(columns) if columns is not None else [c for c in df.columns if c not in fixed]
-    base = df[fixed].copy()
-    base["step"] = range(len(df))
-    long = (
-        pd.concat([base.assign(**{series_name: c, value_name: df[c].to_numpy()}) for c in columns])
-        .reset_index(drop=True)
-    )
-    return long[[series_name, "step", *fixed, value_name]]
+    keep_list = list(keep or [])
+    fixed = keep_list + ([time] if time else [])
+    cols = list(columns) if columns is not None else [c for c in df.columns if c not in fixed]
+    n_rows = len(df)
+    n_cols = len(cols)
+    if n_cols == 0:
+        raise ValueError("no value columns found to reshape")
+
+    # Stack column-by-column: all rows of col 0, then all rows of col 1, ...
+    values = df[cols].to_numpy(copy=False).T.reshape(-1)
+    data: dict[str, object] = {
+        series_name: np.repeat(np.asarray(cols, dtype=object), n_rows),
+        "step": np.tile(np.arange(n_rows, dtype=np.int64), n_cols),
+    }
+    for col in fixed:
+        data[col] = np.tile(df[col].to_numpy(copy=False), n_cols)
+    data[value_name] = values
+    return cast(pd.DataFrame, pd.DataFrame(data))

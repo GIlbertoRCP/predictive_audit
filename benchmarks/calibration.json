@@ -1,0 +1,51 @@
+{
+  "n_trials": 400,
+  "n_boot": 400,
+  "results": [
+    {
+      "phi": 0.0,
+      "iid_fpr": 0.055,
+      "moving_block_32_fpr": 0.075,
+      "moving_block_64_fpr": 0.08,
+      "politis_white_fpr": 0.06,
+      "politis_white_median_block": 2,
+      "dm_hac_fpr": 0.06
+    },
+    {
+      "phi": 0.7,
+      "iid_fpr": 0.475,
+      "moving_block_32_fpr": 0.075,
+      "moving_block_64_fpr": 0.085,
+      "politis_white_fpr": 0.08,
+      "politis_white_median_block": 20,
+      "dm_hac_fpr": 0.0875
+    },
+    {
+      "phi": 0.9,
+      "iid_fpr": 0.665,
+      "moving_block_32_fpr": 0.12,
+      "moving_block_64_fpr": 0.1075,
+      "politis_white_fpr": 0.1075,
+      "politis_white_median_block": 42,
+      "dm_hac_fpr": 0.2575
+    },
+    {
+      "phi": 0.95,
+      "iid_fpr": 0.7725,
+      "moving_block_32_fpr": 0.2175,
+      "moving_block_64_fpr": 0.1425,
+      "politis_white_fpr": 0.1425,
+      "politis_white_median_block": 62,
+      "dm_hac_fpr": 0.37
+    },
+    {
+      "phi": 0.98,
+      "iid_fpr": 0.8625,
+      "moving_block_32_fpr": 0.3725,
+      "moving_block_64_fpr": 0.265,
+      "politis_white_fpr": 0.23,
+      "politis_white_median_block": 88,
+      "dm_hac_fpr": 0.5825
+    }
+  ]
+}

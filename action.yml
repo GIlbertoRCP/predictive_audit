@@ -1,0 +1,99 @@
+name: "Predictive Audit"
+description: "Gate time-series forecasting models against causal baselines, block-bootstrap CIs, and temporal/feature leakage checks."
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  data:
+    description: "Path to CSV or Parquet predictions file."
+    required: true
+  target:
+    description: "Target column holding y[t + horizon]."
+    required: true
+  task:
+    description: "Task type: classification or regression."
+    required: false
+    default: "regression"
+  pred:
+    description: "Model prediction column name."
+    required: false
+    default: ""
+  group:
+    description: "Comma-separated group columns identifying each series."
+    required: false
+    default: ""
+  time:
+    description: "Time column name."
+    required: false
+    default: ""
+  split:
+    description: "Split column name (train / test / history)."
+    required: false
+    default: ""
+  features:
+    description: "Comma-separated feature columns to scan for leakage."
+    required: false
+    default: ""
+  horizon:
+    description: "Forecast horizon in steps."
+    required: false
+    default: "1"
+  metric:
+    description: "Primary evaluation metric."
+    required: false
+    default: ""
+  season:
+    description: "Seasonal period integer or 'auto'."
+    required: false
+    default: ""
+  fail-on:
+    description: "Exit non-zero at this verdict: fail, warn, or never."
+    required: false
+    default: "fail"
+  report-path:
+    description: "Optional path to write the Markdown report (also appended to GITHUB_STEP_SUMMARY)."
+    required: false
+    default: "audit-report.md"
+
+outputs:
+  verdict:
+    description: "Overall audit verdict (PASS, WARN, FAIL, or INFO)."
+    value: ${{ steps.run.outputs.verdict }}
+  report-path:
+    description: "Path to the generated Markdown report."
+    value: ${{ inputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: astral-sh/setup-uv@v5
+    - id: run
+      shell: bash
+      run: |
+        set +e
+        ARGS=(
+          "${{ inputs.data }}"
+          --target "${{ inputs.target }}"
+          --task "${{ inputs.task }}"
+          --horizon "${{ inputs.horizon }}"
+          --fail-on "${{ inputs.fail-on }}"
+          --format markdown
+          --out "${{ inputs.report-path }}"
+        )
+        [ -n "${{ inputs.pred }}" ] && ARGS+=(--pred "${{ inputs.pred }}")
+        [ -n "${{ inputs.group }}" ] && ARGS+=(--group "${{ inputs.group }}")
+        [ -n "${{ inputs.time }}" ] && ARGS+=(--time "${{ inputs.time }}")
+        [ -n "${{ inputs.split }}" ] && ARGS+=(--split "${{ inputs.split }}")
+        [ -n "${{ inputs.features }}" ] && ARGS+=(--features "${{ inputs.features }}")
+        [ -n "${{ inputs.metric }}" ] && ARGS+=(--metric "${{ inputs.metric }}")
+        [ -n "${{ inputs.season }}" ] && ARGS+=(--season "${{ inputs.season }}")
+
+        uv run --with "${{ github.action_path }}" predictive-audit "${ARGS[@]}"
+        EXIT_CODE=$?
+        if [ -f "${{ inputs.report-path }}" ]; then
+          cat "${{ inputs.report-path }}" >> "$GITHUB_STEP_SUMMARY"
+          VERDICT=$(grep -m1 '\*\*Verdict:' "${{ inputs.report-path }}" | sed 's/.*Verdict: \([A-Z]*\).*/\1/')
+          echo "verdict=${VERDICT}" >> "$GITHUB_OUTPUT"
+        fi
+        exit $EXIT_CODE
