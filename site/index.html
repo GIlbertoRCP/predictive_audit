@@ -145,9 +145,9 @@ footer p { color: var(--ink-2); }
 <header class="hero">
   <p class="kicker">predictive-audit · a reproducibility study</p>
   <h1>Did the model beat yesterday?</h1>
-  <p class="lede">I audited five published network-traffic forecasting results against the dumbest possible
-  forecasts: <em>the next value equals the current one</em>, a short moving average, and <em>the same value one cycle ago</em>.
-  Four of the five do not clearly beat them.</p>
+  <p class="lede">I audited six published network-traffic and cloud-workload forecasting results against the dumbest possible
+  forecasts: <em>the next value equals the current one</em>, a short moving average, <em>the same value one cycle ago</em>, and a causal linear AR.
+  Five of the six do not clearly beat them.</p>
   <div class="stats" id="hero-stats"></div>
 </header>
 
@@ -168,6 +168,13 @@ learning anything. So a model's raw score says little; what matters is its margi
   <div class="chart" id="chart-ar"></div>
   <figcaption>At the autocorrelation typical of 5-minute traffic (0.9–0.96 in the datasets below), persistence alone
   scores an R² of roughly 0.8–0.92. A paper reporting R² = 0.94 has shown very little until it reports this number too.</figcaption>
+</figure>
+<figure id="fig-calibration" hidden>
+  <p class="fig-title">Why an i.i.d. bootstrap fails on autocorrelated errors</p>
+  <p class="fig-sub">Empirical false-positive rate across 400 Monte Carlo AR(1) trials under H₀ (true margin = 0, nominal α = 5%)</p>
+  <div class="legend"><span><i class="key" style="background:var(--bad)"></i>i.i.d. bootstrap</span><span><i class="key" style="background:var(--model)"></i>Politis–White Circular Block Bootstrap</span><span><i class="key" style="background:var(--baseline)"></i>Diebold–Mariano HAC</span></div>
+  <div class="chart" id="chart-calibration"></div>
+  <figcaption>On series with lag-1 autocorrelation φ = 0.70–0.95, an i.i.d. 95% CI hallucinates significance 48%–77% of the time when the model has zero real skill. Adaptive Circular Block Bootstrapping cuts false positives by 5.4×–6.2×.</figcaption>
 </figure>
 </section>
 
@@ -266,6 +273,24 @@ same test cells, in the same scaled units, shows both numbers are worse than rep
 </section>
 
 <section>
+<h2>Case 06: cloud VM CPU utilization (Microsoft Azure)</h2>
+<p class="case-tag">BiswajitPadhi99/predicting-cloud-CPU-utilization-on-Azure-dataset-using-deeplearning · LSTM / GRU / IndRNN on 30-day 5-minute Azure VM traces</p>
+<p>The same failure modes appear outside networking. On Microsoft Azure's public VM trace (5-minute aggregate <code>min</code>, <code>max</code>, and <code>avg</code> CPU across 30 days), lag-1 autocorrelation is <strong>0.999</strong>: persistence alone reaches <strong>R² 0.9978</strong> and <strong>1.11% MAPE</strong>—matching or beating the notebooks' reported 1.12%–1.25% MAPE, and beating both LSTM and IndRNN in the notebooks' own scaled evaluation.</p>
+<p>A 1-line exponential moving average (EWMA) beats the 128-unit IndRNN on raw RMSE, and a causal Ridge <code>Linear AR(5)</code> on the exact same 5-step lookback beats all three deep networks on both RMSE and MAE. The audit also caught two metric bugs: all three notebooks print <code>sqrt(MAE)</code> as "MAE" (130× below reality), and the GRU notebook correlates row 0 with row 1 of its own predictions to print <code>1.000000 COR</code>.</p>
+<figure>
+  <p class="fig-title">Azure aggregate average CPU, first two test days</p>
+  <p class="fig-sub">Total VM CPU units (millions) per 5 minutes</p>
+  <div class="legend"><span><i class="key" style="background:var(--ink)"></i>Actual</span><span><i class="key" style="background:var(--model)"></i>Causal Linear AR(5)</span><span><i class="key" style="background:var(--baseline)"></i>Persistence</span></div>
+  <div class="chart" id="chart-case06-trace"></div>
+</figure>
+<figure>
+  <p class="fig-title">Test RMSE across all 3 CPU series (lower is better)</p>
+  <p class="fig-sub">5,166 scored cells (1,722 test steps × min/max/avg CPU), raw units</p>
+  <div class="chart" id="chart-case06-rmse"></div>
+</figure>
+</section>
+
+<section>
 <h2>Case 02: one that holds up</h2>
 <p class="case-tag">xiaochus/TrafficFlowPrediction · 681★ on GitHub · freeway flow (PeMS), LSTM / GRU / stacked autoencoders</p>
 <p>An audit that fails everything would be worthless. This repository ships its trained weights, so I ran the exact
@@ -310,6 +335,7 @@ the published weights, case 05 compares printed numbers. Each case's README list
 <a href="https://github.com/THU-INSC-NAD/Traffic-Matrix-Prediction">THU-INSC-NAD/Traffic-Matrix-Prediction</a>,
 <a href="https://github.com/duchuyle108/SDN-TMprediction">duchuyle108/SDN-TMprediction</a>,
 <a href="https://github.com/Annongkhanh/Traffic-matrix-prediction">Annongkhanh/Traffic-matrix-prediction</a>,
+<a href="https://github.com/BiswajitPadhi99/predicting-cloud-CPU-utilization-on-Azure-dataset-using-deeplearning">BiswajitPadhi99/Azure-CPU</a>,
 and my own <a href="https://github.com/GIlbertoRCP/Predictive_Activation">Predictive_Activation</a>. Thanks to their authors for publishing code and data. That is what made checking possible.</p>
 <p>Gilberto Romero-Cano</p>
 </footer>
@@ -614,16 +640,48 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
 // ---------- data-driven sections ----------
 const load = (name) => fetch(`data/${name}.json`).then((r) => { if (!r.ok) throw new Error(name); return r.json(); });
 
-Promise.all(["case01", "case02", "case04", "summary"].map(load)).then(([c01, c02, c04, sum]) => {
+Promise.all(["case01", "case02", "case04", "case06", "summary"].map(load)).then(([c01, c02, c04, c06, sum]) => {
   const c03 = sum.case03, c05 = sum.case05;
   const nOd = Object.values(c03.tally).reduce((a, t) => a + (t.PASS || 0) + (t.WARN || 0) + (t.FAIL || 0), 0);
   const nPass = Object.values(c03.tally).reduce((a, t) => a + (t.PASS || 0), 0);
 
   onRender(() => statTiles(document.getElementById("hero-stats"), [
-    { value: "4 of 5", label: "audited results don't clearly beat a trivial baseline" },
+    { value: "5 of 6", label: "audited results don't clearly beat simple causal baselines" },
     { value: `${Math.round((c04.rmse.BiLSTM / c04.rmse.seasonal) * 10) / 10}×`, label: "more error than \"one loop ago\" (ICC 2021 paper, showcased flow)" },
     { value: `${Math.round((nPass / nOd) * 100)}%`, label: `of ${nOd} retrained per-flow LSTMs beat every trivial baseline (ISCC 2019 code)` },
   ]));
+
+  // Monte Carlo calibration chart (from benchmarks/calibration.json)
+  if (sum.calibration && sum.calibration.results) {
+    const calFig = document.getElementById("fig-calibration");
+    calFig.hidden = false;
+    const calRows = sum.calibration.results;
+    const phis = calRows.map((r) => r.phi);
+    onRender(() => lineChart(document.getElementById("chart-calibration"), {
+      height: 210,
+      yDomain: [0, 100],
+      refY: 5,
+      xTicks: phis.map((_, i) => i),
+      xFormat: (i) => `φ=${phis[Math.round(i)]?.toFixed(2) ?? ""}`,
+      yFormat: (v) => `${Math.round(v)}%`,
+      series: [
+        { name: "i.i.d. bootstrap", values: calRows.map((r) => r.iid_fpr * 100), color: css("--bad"), width: 2.2 },
+        { name: "Diebold–Mariano HAC", values: calRows.map((r) => r.dm_hac_fpr * 100), color: css("--baseline"), width: 1.8, opacity: 0.85 },
+        { name: "Politis–White CBB", values: calRows.map((r) => r.politis_white_fpr * 100), color: css("--model"), width: 2.4 },
+      ],
+    }));
+    dataTable(
+      document.getElementById("chart-calibration"),
+      ["φ", "i.i.d. FPR", "Politis–White CBB", "Median B", "DM-HAC FPR"],
+      calRows.map((r) => [
+        r.phi.toFixed(2),
+        (r.iid_fpr * 100).toFixed(1) + "%",
+        (r.politis_white_fpr * 100).toFixed(1) + "%",
+        String(r.politis_white_median_block),
+        (r.dm_hac_fpr * 100).toFixed(1) + "%",
+      ]),
+    );
+  }
 
   // case 01
   const agree = c01.congested.slice(1).filter((v, i) => v === c01.congested[i]).length / (c01.congested.length - 1);
@@ -729,6 +787,31 @@ Promise.all(["case01", "case02", "case04", "summary"].map(load)).then(([c01, c02
   onRender(() => barChart(document.getElementById("chart-case05"), { rows: c05Rows, xFormat: (v) => v.toFixed(3) }));
   dataTable(document.getElementById("chart-case05"), ["Dataset / forecaster", "RMSE"], c05Rows.map((r) => [r.label, r.value.toFixed(4)]));
 
+  // case 06 (Azure cloud VM CPU)
+  onRender(() => lineChart(document.getElementById("chart-case06-trace"), {
+    height: 240,
+    xFormat: (v) => `day ${Math.floor((v * 5) / 1440) + 1} ${String(Math.floor(((v * 5) % 1440) / 60)).padStart(2, "0")}:00`,
+    yFormat: (v) => fmt(v, 2) + "M",
+    xTicks: [0, 144, 288, 432, 575],
+    series: [
+      { name: "Actual", values: c06.y_avg_m, color: css("--ink"), width: 1.4 },
+      { name: "Causal Linear AR(5)", values: c06.ar_avg_m, color: css("--model"), width: 1.5 },
+      { name: "Persistence", values: c06.persist_avg_m, color: css("--baseline"), width: 1.5, opacity: 0.85 },
+    ],
+  }));
+  const c06Rows = [
+    { label: "Causal Linear AR(5)", value: c06.baseline_rmse["linear AR(5)"], color: css("--baseline"), strong: true },
+    { label: "GRU (128, reported)", value: c06.reported_rmse["GRU (128)"], color: css("--model") },
+    { label: "LSTM (128, reported)", value: c06.reported_rmse["LSTM (128)"], color: css("--model") },
+    { label: "EWMA (3)", value: c06.baseline_rmse["ewma (3)"], color: css("--baseline") },
+    { label: "IndRNN (128, reported)", value: c06.reported_rmse["IndRNN (128)"], color: css("--model") },
+    { label: "Persistence (lag 1)", value: c06.baseline_rmse.persistence, color: css("--baseline") },
+  ];
+  onRender(() => barChart(document.getElementById("chart-case06-rmse"), {
+    rows: c06Rows, domain: [24000, 32000], xFormat: (v) => fmt(v, 0),
+  }));
+  dataTable(document.getElementById("chart-case06-rmse"), ["Forecaster", "Test RMSE"], c06Rows.map((r) => [r.label, fmt(r.value, 1)]));
+
   // case 02
   onRender(() => lineChart(document.getElementById("chart-case02"), {
     height: 260, xFormat: (v) => `${String(Math.floor((v * 5) / 60)).padStart(2, "0")}:${String((v * 5) % 60).padStart(2, "0")}`,
@@ -753,6 +836,7 @@ Promise.all(["case01", "case02", "case04", "summary"].map(load)).then(([c01, c02
     ["03", "Traffic-Matrix-Prediction (ISCC 2019)", { cls: "fail", text: "FAIL" }, "LSTM 11–21% worse than persistence on all three backbones."],
     ["04", "SDN-TMprediction (ICC 2021)", { cls: "fail", text: "FAIL" }, "Replay-loop baseline wins on 9 of 13 flows; 2.4× better on the showcased one."],
     ["05", "Annongkhanh/Traffic-matrix-prediction", { cls: "fail", text: "FAIL" }, "Reported error higher than persistence on both datasets."],
+    ["06", "Azure VM CPU utilization (cloud trace)", { cls: "fail", text: "FAIL" }, "Persistence hits R² 0.9978 & 1.11% MAPE; EWMA beats IndRNN, causal AR(5) beats all 3 RNNs."],
   ]);
 }).catch((err) => {
   const p = document.createElement("p");

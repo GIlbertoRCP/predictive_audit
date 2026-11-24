@@ -81,7 +81,18 @@ def case05():
     return out
 
 
+def calibration():
+    path = ROOT / "benchmarks" / "calibration.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
 if __name__ == "__main__":
-    path = write("summary", {"case03": case03(), "case04": case04(), "case05": case05()})
+    payload = {"case03": case03(), "case04": case04(), "case05": case05()}
+    cal = calibration()
+    if cal is not None:
+        payload["calibration"] = cal
+    path = write("summary", payload)
     print("wrote", path, path.stat().st_size, "bytes")
     print(json.dumps(json.loads(path.read_text())["case05"], indent=1))

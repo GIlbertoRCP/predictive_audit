@@ -3,7 +3,7 @@
 Goal: 10–15 public network / systems forecasting results, audited the same way as case 01.
 Status: **approved 2026-10-13.** Third-party data is never committed; each case fetches it, pinned and checksummed, into a gitignored `.cache/`.
 
-Progress: 02, 03, 04, 05 done · 06–10 to do.
+Progress: 02, 03, 04, 05, 06 (Azure VM CPU) done · remaining candidates below.
 
 ## Audit tiers
 
@@ -23,7 +23,7 @@ Progress: 02, 03, 04, 05 done · 06–10 to do.
 | 06 | [chuanting/STDenseNet](https://github.com/chuanting/STDenseNet) | Milan cellular traffic (Telecom Italia); IEEE Comm. Letters 2018 | yes (h5, 24 MB) | Paper RMSE/MAE | R | Well-cited paper; the Milan grid is the standard cellular benchmark. Has daily/weekly seasonality, so seasonal-naive matters here. |
 | 07 | [VarunKurri/Cellular-Traffic-Prediction-using-LSTM](https://github.com/VarunKurri/Cellular-Traffic-Prediction-using-LSTM) | 4G LTE cell traffic, hourly, 1 year | yes (3 cells) | LSTM vs ARIMA | F | Small; hourly data with daily cycles, so seasonal-naive is the key baseline. |
 | 08 | [CN-UPB/ml-traffic-prediction](https://github.com/CN-UPB/ml-traffic-prediction) | GÉANT / TOTEM link traffic; master's thesis | results only (data from TOTEM) | LSTM vs ARIMA results tables | R | University lab; a thesis has explicit evaluation tables. |
-| 09 | [BiswajitPadhi99/…Azure…](https://github.com/BiswajitPadhi99/predicting-cloud-CPU-utilization-on-Azure-dataset-using-deeplearning) | Azure VM CPU utilization; LSTM/GRU/IndRNN | yes (650 KB) | Notebook metrics | F | Systems rather than networking; cloud workload forecasting has the same failure modes. |
+| 09 → **06 ✅** | [BiswajitPadhi99/…Azure…](https://github.com/BiswajitPadhi99/predicting-cloud-CPU-utilization-on-Azure-dataset-using-deeplearning) | Azure VM CPU utilization; LSTM/GRU/IndRNN | yes (650 KB) | Notebook metrics | R | **Done as Case 06 (FAIL):** persistence hits R² 0.9978 & 1.11% MAPE (beating LSTM/IndRNN in scaled units); EWMA(3) beats IndRNN and causal Ridge AR(5) beats all 3 RNNs on raw RMSE & MAE. Also exposed `math.sqrt(MAE)` (130× underreport) and broken `np.corrcoef` bugs. |
 | 10 | [xdbdilab/APM](https://github.com/xdbdilab/APM) | Alibaba 2018 + Google 2019 cluster traces | yes | Paper ("accurate prediction of cloud workloads") | R then F | Published paper with real production traces. |
 
 ## Stretch candidates (found during case 03)

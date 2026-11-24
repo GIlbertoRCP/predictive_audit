@@ -1,6 +1,6 @@
 # Did the model beat yesterday?
 
-*Auditing published network-traffic forecasting results against trivial baselines.*
+*Auditing published network-traffic and cloud-workload forecasting results against trivial baselines.*
 *Gilberto Romero-Cano · interactive version: [`site/`](../site/index.html)*
 
 ---
@@ -11,8 +11,8 @@ The model had learned that the label rarely changes. A shuffled train/test split
 
 That made me wonder how common this is in published work. I built a small tool, **predictive-audit**, that scores any
 forecasting result against the baselines it has to beat before it means anything, and against the evaluation
-mistakes that make a result look better than it is. Then I ran it on five public results. Four don't clearly beat
-trivial baselines.
+mistakes that make a result look better than it is. Then I ran it on six public results across networking and cloud infrastructure. Five don't clearly beat
+simple causal baselines.
 
 ## The bar
 
@@ -43,6 +43,7 @@ The tool also checks four other things:
 | 03 | Traffic-Matrix-Prediction (ISCC 2019) | **FAIL** | LSTM 11–21% worse than persistence on Abilene, GÉANT and CERNET |
 | 04 | SDN-TMprediction (IEEE ICC 2021) | **FAIL** | "One replay loop ago" wins on 9 of 13 flows; 2.4× better on the showcased one |
 | 05 | Annongkhanh/Traffic-matrix-prediction | **FAIL** | Reported error is higher than persistence's on both datasets |
+| 06 | Azure VM CPU utilization (cloud trace) | **FAIL** | Persistence hits R² 0.9978 & 1.11% MAPE; causal AR(5) beats all 3 RNNs |
 
 ### The traffic was on a loop (case 04)
 
@@ -78,6 +79,10 @@ call "best" made the LSTM worse.
 Some audits need no retraining. This project prints one test MSE per dataset. Scoring persistence on the same test cells,
 in the same scaled units, gives 0.0102 on GÉANT, against the published LSTM's **0.0260**. The 3.6M-parameter model was trained
 on 189 windows.
+
+### Beyond networking: Azure cloud VM CPU (case 06)
+
+The same failure modes carry directly into cloud-infrastructure forecasting. On the 30-day 5-minute Microsoft Azure VM CPU trace (`min`, `max`, and `avg` aggregate CPU), lag-1 autocorrelation is **0.999**: persistence alone scores **R² 0.9978** and **1.11% MAPE**, already matching or beating the repository's LSTM (1.12%), GRU (1.17%), and IndRNN (1.25%), and beating both LSTM and IndRNN on the notebooks' own scaled `model.evaluate` metrics. A one-line EWMA(3) beats the 128-unit IndRNN on raw RMSE (29,320 vs. 29,481), and a closed-form causal Ridge `Linear AR(5)` on the exact same 5-step window beats all three deep models on both raw RMSE (27,920 vs. 28,808–29,481) and true MAE (15,816 vs. 16,941–18,712). The audit also uncovered two metric bugs: all three notebooks print `math.sqrt(mean_absolute_error(...))` as "MAE" (underreporting error by 130×), and the GRU notebook passes a 2D array to `np.corrcoef`, correlating consecutive rows of its own predictions to print `1.000000 COR`.
 
 ### One that holds up (case 02)
 
