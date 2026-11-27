@@ -12,7 +12,12 @@ All notable changes to **predictive-audit** are documented here.
 - **Native Phase 1 kernels** behind the same Python signatures: `compute`/`score`/`table` for all nine additive and confusion-matrix metrics, the prefix-sum circular block bootstrap (plain, per-group, and time-aligned panels), Politis–White and default block lengths, Diebold–Mariano HAC, and Benjamini–Hochberg / Holm–Bonferroni.
 - **Bit-identical results:** the engine reimplements NumPy's `SeedSequence` + `PCG64` + `Generator.integers` (Lemire) and NumPy's pairwise summation, `cumsum` and `percentile` order, so bootstrap intervals, metrics and block lengths match the Python reference exactly for the same seed. Diebold–Mariano agrees to ~1e-13 (NumPy's dot products go through BLAS).
 - **Parallel bootstrap** on a persistent thread pool (`PREDICTIVE_AUDIT_THREADS`); results do not depend on the thread count. The pool is fork-safe (a `fork()`ed child, e.g. `multiprocessing` on Linux, starts a fresh pool) and can be resized while jobs run. ROC-AUC / PR-AUC stay on the Python path until Phase 2.
-- `tests/test_native_parity.py` (hypothesis-driven native-vs-Python checks), `benchmarks/bench_native.py`, ThreadSanitizer CI job.
+- **Native Phase 2 kernels:**
+  - **Baselines:** group lags, pandas' Kahan rolling mean (bit-identical), EWMA, per-group Ridge AR(p) fit in parallel, and FFT season estimation.
+  - **Rank metrics:** scikit-learn-exact ROC-AUC and average precision (bit-identical), and an O(n log n) optimal-threshold search.
+  - **Rank-metric bootstrap:** sorts once, then runs a weighted O(n) sweep per draw, bit-identical to calling scikit-learn on each resample.
+  - **Result:** a 785-series audit with every baseline runs 17× faster (3.6 s → 0.21 s); the Ridge AR baseline is 71× faster and the ROC/PR bootstraps 130–170× faster.
+- `tests/test_native_parity.py` and `tests/test_native_parity_baselines.py` (hypothesis-driven native-vs-reference checks), `benchmarks/bench_native.py`, ThreadSanitizer CI job.
 
 ### Changed
 - Build backend switched from setuptools to **scikit-build-core** + nanobind (C++20 compiler and CMake ≥ 3.24 needed for source builds).

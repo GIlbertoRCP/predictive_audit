@@ -20,10 +20,12 @@
 #include <utility>
 #include <vector>
 
+#include "paudit/baselines.hpp"
 #include "paudit/bootstrap.hpp"
 #include "paudit/inference.hpp"
 #include "paudit/metrics.hpp"
 #include "paudit/parallel.hpp"
+#include "paudit/rank.hpp"
 #include "paudit/rng.hpp"
 #include "paudit/version.hpp"
 
@@ -34,11 +36,13 @@ namespace {
 
 using F64 = nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
 using I64 = nb::ndarray<const std::int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
+using U8 = nb::ndarray<const std::uint8_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
 template <class T>
 using NumpyOut = nb::ndarray<nb::numpy, T, nb::ndim<1>>;
 
 std::span<const double> span_of(const F64& a) { return {a.data(), a.shape(0)}; }
 std::span<const std::int64_t> span_of(const I64& a) { return {a.data(), a.shape(0)}; }
+std::span<const std::uint8_t> span_of(const U8& a) { return {a.data(), a.shape(0)}; }
 
 paudit::Metric metric_of(const std::string& name) {
   const auto m = paudit::parse_metric(name);
@@ -187,6 +191,76 @@ NB_MODULE(_native, m) {
       "p"_a);
   m.def("holm_bonferroni", [](const F64& p) { return to_numpy(paudit::holm_bonferroni(span_of(p))); }, "p"_a);
   m.def("student_t_two_sided_p", &paudit::student_t_two_sided_p, "t"_a, "df"_a);
+
+  // --- baselines ----------------------------------------------------------------------------------
+  m.def(
+      "lag",
+      [](const F64& values, const std::optional<I64>& groups, std::int64_t k) {
+        std::vector<double> out;
+        {
+          const nb::gil_scoped_release release;
+          out = paudit::lag(span_of(values), groups_of(groups), k);
+        }
+        return to_numpy(std::move(out));
+      },
+      "values"_a, "groups"_a.none(), "k"_a);
+
+  m.def(
+      "rolling_mean",
+      [](const F64& values, const std::optional<I64>& groups, std::size_t window, std::size_t min_periods) {
+        std::vector<double> out;
+        {
+          const nb::gil_scoped_release release;
+          out = paudit::rolling_mean(span_of(values), groups_of(groups), window, min_periods);
+        }
+        return to_numpy(std::move(out));
+      },
+      "values"_a, "groups"_a.none(), "window"_a, "min_periods"_a);
+
+  m.def(
+      "ewm_mean",
+      [](const F64& values, const std::optional<I64>& groups, double span) {
+        std::vector<double> out;
+        {
+          const nb::gil_scoped_release release;
+          out = paudit::ewm_mean(span_of(values), groups_of(groups), span);
+        }
+        return to_numpy(std::move(out));
+      },
+      "values"_a, "groups"_a.none(), "span"_a);
+
+  m.def(
+      "linear_ar",
+      [](const F64& target, const std::optional<I64>& groups, std::int64_t horizon, const U8& fit_mask,
+         std::size_t lags, double alpha, bool clip_unit_interval) {
+        std::vector<double> out;
+        {
+          const nb::gil_scoped_release release;
+          out = paudit::linear_ar(span_of(target), groups_of(groups), horizon, span_of(fit_mask), lags, alpha,
+                                  clip_unit_interval);
+        }
+        return to_numpy(std::move(out));
+      },
+      "target"_a, "groups"_a.none(), "horizon"_a, "fit_mask"_a, "lags"_a, "alpha"_a, "clip_unit_interval"_a);
+
+  m.def(
+      "estimate_season",
+      [](const F64& target, const std::optional<I64>& groups, const U8& fit_mask, std::int64_t max_lag,
+         std::int64_t min_lag) {
+        const nb::gil_scoped_release release;
+        return paudit::estimate_season(span_of(target), groups_of(groups), span_of(fit_mask), max_lag,
+                                       min_lag);
+      },
+      "target"_a, "groups"_a.none(), "fit_mask"_a, "max_lag"_a = 2000, "min_lag"_a = 2);
+
+  m.def(
+      "optimal_threshold",
+      [](const std::string& metric, const F64& y_true, const F64& y_score) {
+        const auto mt = metric_of(metric);
+        const nb::gil_scoped_release release;
+        return paudit::optimal_threshold(mt, span_of(y_true), span_of(y_score));
+      },
+      "metric"_a, "y_true"_a, "y_score"_a);
 
   // --- test support -------------------------------------------------------------------------------
   m.def(

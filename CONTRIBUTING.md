@@ -31,7 +31,9 @@ New native kernels keep the existing Python signature and dispatch on `_backend.
 time, so every kernel gets a parity test in `tests/test_native_parity.py` that runs identical
 inputs through both backends. Where NumPy's evaluation order is defined (pairwise `np.sum`,
 `np.cumsum`, `np.percentile`, `default_rng` draws), native results must be **bit-identical**;
-reproduce NumPy's order rather than loosening a tolerance.
+reproduce NumPy's order rather than loosening a tolerance. The two documented exceptions are
+results that come from LAPACK/BLAS (Ridge AR solves, dot products), and pandas' EWMA, whose own
+arm64 build fuses multiply-adds. Parity tests scale their tolerance to the problem in those cases.
 
 Native kernels use all cores by default; set `PREDICTIVE_AUDIT_THREADS=N` (or call
 `predictive_audit._native.set_num_threads(N)`) to limit them. Results never depend on the

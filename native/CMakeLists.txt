@@ -41,10 +41,13 @@ FetchContent_MakeAvailable(pocketfft)
 
 # --- core library -------------------------------------------------------------
 add_library(paudit STATIC
+  src/baselines.cpp
   src/bootstrap.cpp
+  src/fft.cpp
   src/inference.cpp
   src/metrics.cpp
   src/parallel.cpp
+  src/rank.cpp
   src/rng.cpp
   src/version.cpp
 )
@@ -105,11 +108,13 @@ if(PAUDIT_BUILD_TESTS)
 
   enable_testing()
   add_executable(paudit_tests
+    tests/test_baselines.cpp
     tests/test_bootstrap.cpp
     tests/test_inference.cpp
     tests/test_metrics.cpp
     tests/test_numeric.cpp
     tests/test_parallel.cpp
+    tests/test_rank.cpp
     tests/test_rng.cpp
     tests/test_version.cpp
   )
