@@ -10,3 +10,4 @@ htmlcov/
 dist/
 .DS_Store
 cases/*/.cache/
+build/

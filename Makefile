@@ -1,7 +1,12 @@
-.PHONY: test cov lint typecheck bench site check
+.PHONY: test test-both cov lint typecheck bench site check native native-test native-asan format
 
 test:
 	uv run pytest -v
+
+# Run the whole suite on the native engine and on the pure-Python reference.
+test-both:
+	PREDICTIVE_AUDIT_BACKEND=native uv run pytest -q
+	PREDICTIVE_AUDIT_BACKEND=python uv run pytest -q
 
 cov:
 	uv run pytest --cov=predictive_audit --cov-report=term-missing --cov-fail-under=90
@@ -19,4 +24,20 @@ bench:
 site:
 	uv run python site/build_data.py
 
-check: lint typecheck cov
+# Standalone C++ build: library, `predictive-audit` binary, Catch2 tests.
+native:
+	cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release -DPAUDIT_WERROR=ON
+	cmake --build build/native --parallel
+
+native-test: native
+	ctest --test-dir build/native --output-on-failure
+
+native-asan:
+	cmake -S native -B build/asan -DCMAKE_BUILD_TYPE=Debug -DPAUDIT_WERROR=ON -DPAUDIT_SANITIZE=address,undefined
+	cmake --build build/asan --parallel
+	ctest --test-dir build/asan --output-on-failure
+
+format:
+	find native \( -name '*.cpp' -o -name '*.hpp' \) | xargs uvx clang-format==19.1.7 -i
+
+check: lint typecheck cov native-test

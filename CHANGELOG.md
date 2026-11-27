@@ -2,6 +2,17 @@
 
 All notable changes to **predictive-audit** are documented here.
 
+## [Unreleased]
+
+### Added
+- **Native C++20 engine scaffold** (`native/`, Phase 0 of [docs/NATIVE_CORE_PLAN.md](docs/NATIVE_CORE_PLAN.md)): `libpaudit` static library, standalone `predictive-audit` executable (`--version` / `--build-info` for now), Catch2 unit tests, strict warnings, opt-in ASan/UBSan.
+- **`predictive_audit._native`** nanobind extension and **`PREDICTIVE_AUDIT_BACKEND=auto|native|python`** backend switch; `predictive_audit.backend()` reports the active one. The pure-Python implementation is kept as the reference oracle.
+- CI: native build + tests on Linux/macOS/Windows, sanitizer job, clang-format check, and the full pytest suite on both backends.
+
+### Changed
+- Build backend switched from setuptools to **scikit-build-core** + nanobind (C++20 compiler and CMake ≥ 3.24 needed for source builds).
+- Release workflow builds platform wheels with **cibuildwheel** (Linux x86_64/aarch64, macOS arm64/x86_64, Windows x64; CPython 3.10–3.13) and tests each wheel.
+
 ## [0.2.0] - 2026-11-24
 
 ### Added
