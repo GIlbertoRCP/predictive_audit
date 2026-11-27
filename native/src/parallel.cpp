@@ -21,8 +21,22 @@ namespace {
 
 thread_local bool tl_inside_parallel = false;
 
+/// Value of an environment variable, or "" when unset. MSVC deprecates std::getenv (C4996).
+std::string env_value(const char* name) {
+#if defined(_MSC_VER)
+  char* buf = nullptr;
+  std::size_t len = 0;
+  if (_dupenv_s(&buf, &len, name) != 0 || buf == nullptr) return {};
+  const std::unique_ptr<char, decltype(&std::free)> owned(buf, &std::free);
+  return std::string(owned.get());
+#else
+  const char* value = std::getenv(name);
+  return value != nullptr ? std::string(value) : std::string();
+#endif
+}
+
 unsigned default_threads() {
-  if (const char* env = std::getenv("PREDICTIVE_AUDIT_THREADS"); env != nullptr && *env != '\0') {
+  if (const std::string env = env_value("PREDICTIVE_AUDIT_THREADS"); !env.empty()) {
     try {
       const long v = std::stol(env);
       if (v > 0) return static_cast<unsigned>(std::min<long>(v, 1024));
