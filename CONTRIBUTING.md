@@ -22,11 +22,20 @@ The pure-Python code paths stay as the reference oracle, and `PREDICTIVE_AUDIT_B
 make test-both            # full suite on the native engine and on the Python reference
 make native-test          # standalone CMake build: library, predictive-audit binary, Catch2 tests
 make native-asan          # same, with AddressSanitizer + UndefinedBehaviorSanitizer
+make native-tsan          # same, with ThreadSanitizer (the bootstrap runs on a thread pool)
+make bench-native         # Python reference vs native kernels -> benchmarks/native_kernels.json
 make format               # clang-format (pinned 19.1.7) on native/
 ```
 
 New native kernels keep the existing Python signature and dispatch on `_backend.native` at call
-time, so every kernel gets a parity test that runs identical inputs through both backends.
+time, so every kernel gets a parity test in `tests/test_native_parity.py` that runs identical
+inputs through both backends. Where NumPy's evaluation order is defined (pairwise `np.sum`,
+`np.cumsum`, `np.percentile`, `default_rng` draws), native results must be **bit-identical**;
+reproduce NumPy's order rather than loosening a tolerance.
+
+Native kernels use all cores by default; set `PREDICTIVE_AUDIT_THREADS=N` (or call
+`predictive_audit._native.set_num_threads(N)`) to limit them. Results never depend on the
+thread count.
 
 ## Adding a new case study
 

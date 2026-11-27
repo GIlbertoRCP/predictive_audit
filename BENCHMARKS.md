@@ -58,10 +58,41 @@ In [Case 03](cases/03_thu_traffic_matrix/run.py), 785 independent per-OD LSTMs a
 
 ---
 
+## 4. Native C++ Engine — Phase 1 Kernels
+
+The bootstrap, metric, block-length, Diebold–Mariano and FDR kernels now run in C++20 (`native/`), dispatched from the same Python functions. Every native result below was checked against the Python reference before being timed, and the bootstrap intervals are **bit-identical**. The engine reimplements NumPy's `default_rng` stream and its pairwise summation order. Median of 15 runs, same machine as above (Apple Silicon, 12 threads), from [`benchmarks/native_kernels.json`](benchmarks/native_kernels.json):
+
+| Workload | Python reference | Native | Speedup |
+|---|---:|---:|---:|
+| Bootstrap MAE · 10k rows · 500 draws | 0.59 ms | **0.18 ms** | **3.2×** |
+| Bootstrap F1 · 10k rows · 500 draws | 1.92 ms | **0.26 ms** | **7.4×** |
+| Bootstrap MAE · 100k rows · 500 draws | 2.60 ms | **0.67 ms** | **3.9×** |
+| Bootstrap F1 · 100k rows · 500 draws | 9.24 ms | **1.15 ms** | **8.0×** |
+| Bootstrap MAE · 500k rows · 500 draws | 10.28 ms | **2.09 ms** | **4.9×** |
+| Bootstrap F1 · 500k rows · 500 draws | 43.50 ms | **3.90 ms** | **11.2×** |
+| Bootstrap MAE · 500 × 2,000 aligned panel (1M rows) | 7.28 ms | **2.64 ms** | **2.8×** |
+| Diebold–Mariano HAC · 100k rows | 0.88 ms | 1.18 ms | 0.8× |
+| Politis–White block length · 100k rows | 2.81 ms | 2.92 ms | 1.0× |
+| `audit()` MAE · 10k rows (end to end) | 2.76 ms | 2.27 ms | 1.2× |
+| `audit()` MAE · 500k rows (end to end) | 74.33 ms | 69.63 ms | 1.1× |
+| `audit()` F1 · 10k rows (end to end) | 7.93 ms | 6.75 ms | 1.2× |
+| `audit()` F1 · 500k rows (end to end) | 128.25 ms | 117.33 ms | 1.1× |
+
+**Thread scaling** (F1 bootstrap, 1M rows, block 20, 2,000 draws): 1 thread 1,800 ms → 2: 1.75× → 4: 2.82× → 8: 3.89× → 12: 3.99×. Each draw does random lookups into ~72 MB of prefix sums, so the workload becomes memory-bandwidth-bound past ~8 threads. Results are identical at every thread count.
+
+**Reading these numbers honestly:**
+- The confusion-matrix metrics gain most. The native path keeps all 8 sufficient statistics interleaved (one cache line per block endpoint), where NumPy gathers from 8 separate arrays.
+- Diebold–Mariano and Politis–White are already dominated by BLAS dot products and pocketfft (the same FFT NumPy uses), so they're at parity. They matter for correctness, not speed.
+- **End-to-end `audit()` barely moves (1.1–1.3×).** With the bootstrap native, pandas sorting, the rolling/EWMA baselines and the leakage checks dominate. Moving those is Phases 2–3 of [docs/NATIVE_CORE_PLAN.md](docs/NATIVE_CORE_PLAN.md).
+- Peak-memory figures in section 1 come from `tracemalloc`, which cannot see C++ allocations, so they are not reported for the native path.
+
+---
+
 ## Reproducing Benchmarks
 
 ```bash
 uv run python benchmarks/bench_audit.py --runs 5 --out benchmarks/upgraded_audit.json
 uv run python benchmarks/bench_calibration.py --n-trials 400 --n-boot 400 --out benchmarks/calibration.json
 uv run --group cases python benchmarks/bench_stacked_lstm.py --out benchmarks/stacked_lstm.json
+uv run python benchmarks/bench_native.py --runs 15 --out benchmarks/native_kernels.json
 ```

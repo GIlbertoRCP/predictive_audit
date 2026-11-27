@@ -9,6 +9,11 @@ All notable changes to **predictive-audit** are documented here.
 - **`predictive_audit._native`** nanobind extension and **`PREDICTIVE_AUDIT_BACKEND=auto|native|python`** backend switch; `predictive_audit.backend()` reports the active one. The pure-Python implementation is kept as the reference oracle.
 - CI: native build + tests on Linux/macOS/Windows, sanitizer job, clang-format check, and the full pytest suite on both backends.
 
+- **Native Phase 1 kernels** behind the same Python signatures: `compute`/`score`/`table` for all nine additive and confusion-matrix metrics, the prefix-sum circular block bootstrap (plain, per-group, and time-aligned panels), Politis–White and default block lengths, Diebold–Mariano HAC, and Benjamini–Hochberg / Holm–Bonferroni.
+- **Bit-identical results:** the engine reimplements NumPy's `SeedSequence` + `PCG64` + `Generator.integers` (Lemire) and NumPy's pairwise summation, `cumsum` and `percentile` order, so bootstrap intervals, metrics and block lengths match the Python reference exactly for the same seed. Diebold–Mariano agrees to ~1e-13 (NumPy's dot products go through BLAS).
+- **Parallel bootstrap** on a persistent thread pool (`PREDICTIVE_AUDIT_THREADS`); results do not depend on the thread count. The pool is fork-safe (a `fork()`ed child, e.g. `multiprocessing` on Linux, starts a fresh pool) and can be resized while jobs run. ROC-AUC / PR-AUC stay on the Python path until Phase 2.
+- `tests/test_native_parity.py` (hypothesis-driven native-vs-Python checks), `benchmarks/bench_native.py`, ThreadSanitizer CI job.
+
 ### Changed
 - Build backend switched from setuptools to **scikit-build-core** + nanobind (C++20 compiler and CMake ≥ 3.24 needed for source builds).
 - Release workflow builds platform wheels with **cibuildwheel** (Linux x86_64/aarch64, macOS arm64/x86_64, Windows x64; CPython 3.10–3.13) and tests each wheel.

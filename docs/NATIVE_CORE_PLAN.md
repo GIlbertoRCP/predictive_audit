@@ -1,6 +1,6 @@
 # Native C++ Core — Implementation Plan
 
-**Status:** Phase 0 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
+**Status:** Phases 0–1 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
 
 ## Goal
 
@@ -34,10 +34,10 @@ Record every one of these before and after in `BENCHMARKS.md`. They are the head
 | Build | CMake ≥ 3.24 + **scikit-build-core** | Replaces setuptools in `pyproject.toml`; same CMake builds the CLI, tests and wheel. |
 | Wheels | **cibuildwheel** | manylinux x86_64/aarch64, macOS arm64/x86_64, Windows x64; Python 3.10–3.13. |
 | Threading | Small in-house fixed thread pool (`std::jthread`) | Avoids OpenMP (no libomp on Apple Clang by default); deterministic work partitioning. |
-| RNG | PCG64 with **per-chunk streams** derived from `(seed, chunk_id)` | Results identical regardless of thread count. Not bit-compatible with NumPy (see Risks). |
+| RNG | **Bit-exact NumPy** `SeedSequence` + `PCG64` + `Generator.integers` (Lemire) | Same seed, same draws as `np.random.default_rng`, so bootstrap CIs match the Python reference exactly. Draws are generated sequentially; evaluation runs in parallel (see Determinism contract). |
 | FFT | **pocketfft** (header-only C++) | It is NumPy's own FFT backend, so autocovariances match to ~1e-15. |
 | Linear algebra | Hand-rolled Cholesky for the (p+1)×(p+1) Ridge system, QR fallback | Systems are ≤ ~20×20; no need for Eigen. Add Eigen later only if needed. |
-| Student-t tail (DM p-value) | **Boost.Math** standalone headers (`students_t` cdf) | Replaces `scipy.stats.t.sf`; header-only, Boost licence. |
+| Student-t tail (DM p-value) | In-house regularized incomplete beta (Lentz continued fraction, Stirling-differenced log-beta for large df) | Matches `scipy.stats.t.sf` to < 2e-9 relative over df 1–5e7 without a large Boost download. |
 | CSV/TSV parsing | In-house, `mmap` + chunked multithreaded parse + **fast_float** | Keeps the binary small and static; good engineering showcase. |
 | Parquet / Feather | Optional `PAUDIT_WITH_ARROW=ON` build flag | Arrow is heavy; ship it in the wheel path (pyarrow) first, native later. |
 | CLI args / config | **CLI11** + **toml++** | Header-only; matches today's argparse + TOML-defaults behaviour. |
@@ -98,18 +98,19 @@ Each phase ends with something shippable and a benchmark delta.
 
 Port `metrics.py` behind the same Python signatures:
 
-- [ ] `compute` / `score` / `table` for all additive and confusion metrics (one fused pass that builds every sufficient statistic, not 8 separate arrays).
-- [ ] `_is_aligned_panel`, `_group_circular_layout`, prefix sums, `_block_sums`, `_eval_from_sums`.
-- [ ] `block_bootstrap_diff` for the 9 prefix metrics, parallel over 256-draw chunks with per-chunk RNG streams.
-- [ ] `estimate_block_length` (Politis–White via pocketfft), `default_block_length`.
-- [ ] `diebold_mariano` (Newey–West Bartlett + HLN, Boost.Math t-tail), `benjamini_hochberg`, `holm_bonferroni`.
-- [ ] `np.percentile`-compatible linear interpolation for CI endpoints.
-- [ ] nanobind: accept contiguous float64 / int64 `ndarray`s zero-copy; release the GIL around every kernel.
-- [ ] **Test hook:** `block_bootstrap_diff(..., starts=<int64[n_boot, n_blocks]>)` lets parity tests inject the exact block starts NumPy drew, so CIs can be compared exactly, independent of RNG.
+- [x] `compute` / `score` / `table` for all additive and confusion metrics (one pass per metric; NumPy pairwise-summation order).
+- [x] `_is_aligned_panel`, `_group_circular_layout`, prefix sums, `_block_sums`, `_eval_from_sums`. Prefix columns are interleaved (one cache line per block endpoint for all K statistics) and summed with a K-wide pairwise sum that keeps NumPy's order per column.
+- [x] `block_bootstrap_diff` for the 9 prefix metrics, draws evaluated in parallel on a persistent thread pool.
+- [x] `estimate_block_length` (Politis–White via pocketfft), `default_block_length`.
+- [x] `diebold_mariano` (Newey–West Bartlett + HLN, in-house t-tail), `benjamini_hochberg`, `holm_bonferroni`.
+- [x] `np.percentile`-compatible linear interpolation (including NumPy's `_lerp`) for CI endpoints.
+- [x] nanobind: contiguous float64 / int64 `ndarray`s zero-copy; GIL released around every kernel. Inputs whose dtype semantics differ in C++ (object/string groups, NaT times, seeds outside uint64) fall back to Python.
+- [x] ~~Test hook for injected block starts~~ — not needed: the RNG is bit-exact, so parity tests compare whole calls.
+- [x] `-ffp-contract=off` on GCC/Clang so no a·b+c is fused into an FMA (FMA would change last bits vs NumPy and between CPUs).
 
-**Parity bar:** deterministic functions ≤ 1e-12 relative (hypothesis-generated inputs, including NaN, ties, constant series and single-group panels). Bootstrap with injected starts ≤ 1e-12. Bootstrap with native RNG: verdicts identical on all six cases, and CI endpoints within Monte Carlo error over 20 seeds.
+**Parity bar (met):** bootstrap intervals, metrics and block lengths are **bit-identical** to the Python reference on hypothesis-generated inputs (all 9 metrics; plain, per-group, and int/float/datetime-aligned panels; NaN and degenerate inputs). Diebold–Mariano agrees to ~1e-13 relative (NumPy's dot products use BLAS). Native results do not depend on the thread count. Clean under ASan, UBSan and TSan.
 
-**Done when:** pytest passes on both backends, and `bench_audit.py` shows the native speedup for 10k/100k/500k rows.
+**Result:** the bootstrap is 3–11× faster per call (single process, all cores), with up to ~4× from threads on large memory-bound workloads (`benchmarks/native_kernels.json`). End-to-end `audit()` improves only 1.1–1.3×. Once the bootstrap is native, pandas sorting, baselines and checks dominate, which is exactly what Phases 2–3 move.
 
 ### Phase 2: Baselines, rank metrics, reshape (≈2 weeks)
 
@@ -193,7 +194,7 @@ Port `metrics.py` behind the same Python signatures:
 ## Determinism contract
 
 - The same input, flags and `--seed` give the same report on every OS and with any `--threads` value.
-- Bootstrap draws are split into fixed 256-draw chunks. Chunk *k* gets its own PCG64 stream seeded from `(seed, k)` (via a SeedSequence-style hash), and results are written by chunk index.
+- Bootstrap block starts come from one NumPy-identical PCG64 stream, generated sequentially in bounded chunks (≤ 4M starts at a time). Each draw's statistic is then evaluated in parallel and written to its own slot, so results equal NumPy's and never depend on scheduling.
 - `batch_audit` gives every group the same `seed`, as it does today.
 - Floating-point reductions use a fixed order, never order-of-completion across threads.
 
@@ -201,7 +202,7 @@ Port `metrics.py` behind the same Python signatures:
 
 | Risk | Mitigation |
 |---|---|
-| **Bootstrap CIs change slightly vs 0.2.0 for the same seed** (native RNG ≠ NumPy's PCG64 + Lemire bounded-int stream). | Exact parity is proven via injected starts; end-to-end verdict parity is checked on all cases. Call this out in `CHANGELOG.md` as a seed-semantics change in 0.3.0. Bit-compatible NumPy RNG was considered and rejected: its variable rejection count prevents jump-ahead, which would serialize draw generation and cap thread scaling. |
+| ~~Bootstrap CIs change vs 0.2.0 for the same seed~~ **Resolved in Phase 1.** | The native engine reimplements NumPy's RNG exactly, so there is no seed-semantics change. Draw generation is sequential, but evaluation dominates (several prefix lookups per drawn start), so threads still scale. |
 | pandas semantics drift (rolling, ewm NaN handling, `read_csv` inference, sort NaN placement). | Each is an explicit parity test with adversarial fixtures; the reference oracle runs in CI permanently. |
 | sklearn AUC/AP tie handling. | Port the exact formulas; hypothesis tests with heavy ties. |
 | Float formatting differences in reports. | Golden files; `std::to_chars` for JSON, `std::format` with Python-equivalent specs for text. |
