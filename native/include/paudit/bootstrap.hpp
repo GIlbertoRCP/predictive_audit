@@ -46,7 +46,8 @@ struct Interval {
 };
 
 /// 95% circular-block-bootstrap interval of score(model) - score(baseline), identical to
-/// predictive_audit.metrics.block_bootstrap_diff for every prefix metric (same seed, same draws).
+/// predictive_audit.metrics.block_bootstrap_diff (same seed, same draws). Rank metrics
+/// (roc_auc, pr_auc) require 0/1 labels and finite scores.
 /// Bootstrap draws are evaluated in parallel; results do not depend on the thread count.
 [[nodiscard]] Interval block_bootstrap_diff(Metric metric, std::span<const double> y_true,
                                             std::span<const double> model, std::span<const double> baseline,

@@ -31,6 +31,7 @@ REGRESSION: tuple[str, ...] = ("mae", "rmse", "r2", "smape")
 LOWER_IS_BETTER: set[str] = {"mae", "rmse", "smape", "brier"}
 ADDITIVE_LOSS_METRICS: set[str] = {"mae", "rmse", "smape", "accuracy", "brier"}
 THRESHOLDED_METRICS: set[str] = {"f1", "mcc", "balanced_accuracy", "accuracy"}
+_RANK_METRICS: set[str] = {"roc_auc", "pr_auc"}
 _PREFIX_METRICS: set[str] = {
     "mae",
     "rmse",
@@ -88,6 +89,13 @@ def _native_panel_args(groups: np.ndarray | None, times: np.ndarray | None) -> _
     return None
 
 
+def _rank_inputs_ok(y_true: np.ndarray, *scores: np.ndarray) -> bool:
+    """Native rank metrics need exact 0/1 labels and finite scores (sklearn raises otherwise)."""
+    if not bool(np.isin(y_true, (0.0, 1.0)).all()):
+        return False
+    return all(bool(np.isfinite(s).all()) for s in scores)
+
+
 def _native_seed(seed: Any) -> int | None:
     try:
         value = int(seed)
@@ -119,6 +127,10 @@ def compute(
     native = _backend.native
     if native is not None and name in _PREFIX_METRICS:
         return float(native.compute(name, _f64(y_true), _f64(y_pred), float(threshold)))
+    if native is not None and name in _RANK_METRICS:
+        yt_n, yp_n = _f64(y_true), _f64(y_pred)
+        if len(yt_n) == len(yp_n) and _rank_inputs_ok(yt_n, yp_n):
+            return float(native.compute(name, yt_n, yp_n, float(threshold)))
     yt = np.asarray(y_true, dtype=np.float64)
     yp = np.asarray(y_pred, dtype=np.float64)
     if name == "f1":
@@ -193,6 +205,11 @@ def optimal_threshold(
     """Select the classification threshold maximizing ``metric`` on non-test rows."""
     if metric not in THRESHOLDED_METRICS:
         return 0.5
+    native = _backend.native
+    if native is not None:
+        yt_n, ys_n = _f64(y_true), _f64(y_score)
+        if len(yt_n) == len(ys_n):
+            return float(native.optimal_threshold(metric, yt_n, ys_n))
     yt = np.asarray(y_true, dtype=np.float64)
     ys = np.asarray(y_score, dtype=np.float64)
     ok = ~(np.isnan(yt) | np.isnan(ys))
@@ -500,13 +517,14 @@ def block_bootstrap_diff(
         blocks never cross series boundaries.
     """
     native = _backend.native
-    if native is not None and metric in _PREFIX_METRICS:
+    if native is not None and (metric in _PREFIX_METRICS or metric in _RANK_METRICS):
         args = _native_panel_args(groups, times)
         native_seed = _native_seed(seed)
-        if args is not None and native_seed is not None:
+        yt_n, m_n, b_n = _f64(y_true), _f64(model), _f64(baseline)
+        rank_ok = metric in _PREFIX_METRICS or _rank_inputs_ok(yt_n, m_n, b_n)
+        if args is not None and native_seed is not None and rank_ok:
             lo_n, hi_n = native.block_bootstrap_diff(
-                metric, _f64(y_true), _f64(model), _f64(baseline), int(block), int(n_boot), native_seed,
-                *args, float(threshold),
+                metric, yt_n, m_n, b_n, int(block), int(n_boot), native_seed, *args, float(threshold),
             )
             return float(lo_n), float(hi_n)
     rng = np.random.default_rng(seed)

@@ -58,7 +58,7 @@ In [Case 03](cases/03_thu_traffic_matrix/run.py), 785 independent per-OD LSTMs a
 
 ---
 
-## 4. Native C++ Engine — Phase 1 Kernels
+## 4. Native C++ Engine
 
 The bootstrap, metric, block-length, Diebold–Mariano and FDR kernels now run in C++20 (`native/`), dispatched from the same Python functions. Every native result below was checked against the Python reference before being timed, and the bootstrap intervals are **bit-identical**. The engine reimplements NumPy's `default_rng` stream and its pairwise summation order. Median of 15 runs, same machine as above (Apple Silicon, 12 threads), from [`benchmarks/native_kernels.json`](benchmarks/native_kernels.json):
 
@@ -85,6 +85,30 @@ The bootstrap, metric, block-length, Diebold–Mariano and FDR kernels now run i
 - Diebold–Mariano and Politis–White are already dominated by BLAS dot products and pocketfft (the same FFT NumPy uses), so they're at parity. They matter for correctness, not speed.
 - **End-to-end `audit()` barely moves (1.1–1.3×).** With the bootstrap native, pandas sorting, the rolling/EWMA baselines and the leakage checks dominate. Moving those is Phases 2–3 of [docs/NATIVE_CORE_PLAN.md](docs/NATIVE_CORE_PLAN.md).
 - Peak-memory figures in section 1 come from `tracemalloc`, which cannot see C++ allocations, so they are not reported for the native path.
+
+### Phase 2: baselines, rank metrics, threshold search
+
+Same harness, at Case 03 scale (785 series × 1,000 steps) unless noted. Rows marked † are not bit-identical by design: pandas' EWMA fuses multiply-adds on arm64 (~1e-13), and Ridge AR solves through LAPACK/BLAS. Every other row was asserted bit-identical before timing.
+
+| Workload | Python reference | Native | Speedup |
+|---|---:|---:|---:|
+| Moving average (3), grouped | 36.18 ms | **9.17 ms** | **3.9×** |
+| EWMA (3), grouped † | 25.92 ms | **9.17 ms** | **2.8×** |
+| Ridge AR(5) per series † | 3,042.31 ms | **42.82 ms** | **71.0×** |
+| Season estimate (pooled FFT) | 51.46 ms | **15.01 ms** | **3.4×** |
+| ROC-AUC · 1M rows | 112.38 ms | **84.93 ms** | **1.3×** |
+| Optimal threshold (F1) · 1M rows | 143.83 ms | **52.75 ms** | **2.7×** |
+| Bootstrap ROC-AUC · 20k rows · 500 draws | 2,546.28 ms | **15.20 ms** | **167.5×** |
+| Bootstrap PR-AUC · 20k rows · 500 draws | 1,763.58 ms | **13.40 ms** | **131.6×** |
+| **`audit()` with every baseline · 785 × 1,000 panel** | **3,615.31 ms** | **207.54 ms** | **17.4×** |
+| `audit()` F1 · 10k rows | 8.38 ms | 2.77 ms | 3.0× |
+| `audit()` F1 · 500k rows | 130.32 ms | 104.01 ms | 1.3× |
+
+- The two biggest wins replace Python loops, not vectorized NumPy.
+  - Ridge AR fitted one series at a time in a Python loop; native fits all 785 in parallel.
+  - The rank-metric bootstrap called scikit-learn once per draw. Native sorts once and turns each draw into an O(n) weighted sweep, with the same curve points scikit-learn would compute.
+- ROC-AUC on its own is dominated by the sort, which NumPy already does well.
+- **Single-series audits on large inputs are still pandas-bound** (sorting, group keys, leakage checks): Phase 3.
 
 ---
 

@@ -29,12 +29,13 @@ enum class Metric : std::uint8_t {
 [[nodiscard]] bool lower_is_better(Metric m) noexcept;
 /// Metrics whose bootstrap uses O(1)-per-block prefix sums of per-row sufficient statistics.
 [[nodiscard]] bool is_prefix_metric(Metric m) noexcept;
-/// Metrics computed natively by `compute` (everything except the rank metrics for now).
+/// Metrics computed natively by `compute` (all of them; rank metrics need 0/1 labels).
 [[nodiscard]] bool has_native_compute(Metric m) noexcept;
 
 /// Raw metric value, matching predictive_audit.metrics.compute. Classification targets are
-/// thresholded at 0.5, predictions at `threshold`. Throws std::invalid_argument for rank
-/// metrics (roc_auc, pr_auc) and for inputs of different lengths.
+/// thresholded at 0.5, predictions at `threshold`. Rank metrics (roc_auc, pr_auc) match
+/// scikit-learn and return NaN with one class; they throw std::invalid_argument for labels other
+/// than 0/1 or non-finite scores. Throws for inputs of different lengths.
 [[nodiscard]] double compute(Metric m, std::span<const double> y_true, std::span<const double> y_pred,
                              double threshold = 0.5);
 

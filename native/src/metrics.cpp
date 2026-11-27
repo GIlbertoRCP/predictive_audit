@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "paudit/numeric.hpp"
+#include "paudit/rank.hpp"
 
 namespace paudit {
 namespace {
@@ -73,7 +74,7 @@ bool lower_is_better(Metric m) noexcept {
 
 bool is_prefix_metric(Metric m) noexcept { return m != Metric::roc_auc && m != Metric::pr_auc; }
 
-bool has_native_compute(Metric m) noexcept { return is_prefix_metric(m); }
+bool has_native_compute(Metric /*m*/) noexcept { return true; }
 
 double compute(Metric m, std::span<const double> yt, std::span<const double> yp, double threshold) {
   if (yt.size() != yp.size()) throw std::invalid_argument("y_true and y_pred must have the same length");
@@ -125,10 +126,11 @@ double compute(Metric m, std::span<const double> yt, std::span<const double> yp,
                                    }) /
              nd;
     case Metric::roc_auc:
+      return roc_auc(yt, yp);
     case Metric::pr_auc:
-      break;
+      return average_precision(yt, yp);
   }
-  throw std::invalid_argument("metric " + std::string(metric_name(m)) + " is not implemented natively yet");
+  throw std::invalid_argument("metric " + std::string(metric_name(m)) + " is not implemented natively");
 }
 
 double score(Metric m, std::span<const double> yt, std::span<const double> yp, double threshold) {

@@ -27,7 +27,9 @@ TEST_CASE("classification metrics on a hand-checked confusion matrix", "[metrics
   CHECK_THAT(paudit::compute(Metric::accuracy, y, p), WithinAbs(4.0 / 6.0, 1e-15));
   CHECK_THAT(paudit::compute(Metric::balanced_accuracy, y, p), WithinAbs(2.0 / 3.0, 1e-15));
   CHECK_THAT(paudit::compute(Metric::mcc, y, p), WithinAbs(1.0 / 3.0, 1e-15));
-  CHECK_THROWS_AS(paudit::compute(Metric::roc_auc, y, p), std::invalid_argument);
+  CHECK_THAT(paudit::compute(Metric::roc_auc, y, p), WithinAbs(6.0 / 9.0, 1e-15));
+  CHECK_THROWS_AS(paudit::compute(Metric::roc_auc, std::vector<double>{0, 2}, std::vector<double>{0.1, 0.2}),
+                  std::invalid_argument);
 }
 
 TEST_CASE("regression metrics", "[metrics]") {

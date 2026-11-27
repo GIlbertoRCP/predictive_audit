@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from predictive_audit import _backend, audit, metrics
+from predictive_audit import _backend, audit, baselines, metrics
 
 if not _backend.native_available():
     raise SystemExit("native extension not built; run `uv sync` first")
@@ -92,6 +92,38 @@ def bench_kernels(runs: int) -> list[dict[str, Any]]:
     return rows
 
 
+def bench_phase2(runs: int) -> list[dict[str, Any]]:
+    """Baselines, rank metrics and threshold search at Case 03 scale (785 series x 1,000 steps)."""
+    rng = np.random.default_rng(5)
+    n_series, steps = 785, 1_000
+    g = pd.Series(np.repeat(np.arange(n_series), steps))
+    t = np.tile(np.arange(steps), n_series)
+    y = pd.Series(np.sin(2 * np.pi * t / 24) + rng.normal(scale=0.3, size=len(g)).cumsum() * 0.01)
+    fit = pd.Series(t < 800)
+    slow = max(1, min(runs, 3))
+    rows = [
+        _compare("moving average (3), 785 series x 1,000",
+                 partial(baselines.moving_average, y, g, 1, 3), runs),
+        _compare("EWMA (3), 785 series x 1,000",
+                 partial(baselines.ewma, y, g, 1, 3), runs, exact=False),
+        _compare("Ridge AR(5) per series, 785 series x 1,000",
+                 partial(baselines.linear_ar, y, g, 1, fit, lags=5), slow, exact=False),
+        _compare("season estimate (FFT), 785 series x 1,000",
+                 partial(baselines.estimate_season, y, g, fit), runs),
+    ]
+    yc, mc, bc = _classification(1_000_000, rng)
+    rows.append(_compare("ROC-AUC, 1,000,000 rows", partial(metrics.compute, "roc_auc", yc, mc), runs))
+    rows.append(_compare("optimal threshold (F1), 1,000,000 rows",
+                         partial(metrics.optimal_threshold, "f1", yc, mc), slow))
+    yc, mc, bc = _classification(20_000, rng)
+    bc = np.clip(bc + rng.normal(scale=0.3, size=len(bc)), 0, 1)
+    rows.append(_compare("bootstrap ROC-AUC, 20,000 rows, 500 draws",
+                         partial(metrics.block_bootstrap_diff, "roc_auc", yc, mc, bc, 50, 500, 0), slow))
+    rows.append(_compare("bootstrap PR-AUC, 20,000 rows, 500 draws",
+                         partial(metrics.block_bootstrap_diff, "pr_auc", yc, mc, bc, 50, 500, 0), slow))
+    return rows
+
+
 def bench_audit(runs: int) -> list[dict[str, Any]]:
     rng = np.random.default_rng(7)
     rows = []
@@ -111,6 +143,30 @@ def bench_audit(runs: int) -> list[dict[str, Any]]:
                 return r.checks[1].details["ci95"]
 
             rows.append(_compare(f"audit() {metric}, {n:,} rows (end to end)", run, runs))
+
+    # Full-featured panel audit at Case 03 scale: every baseline, automatic season and threshold.
+    n_series, steps = 785, 1_000
+    t = np.tile(np.arange(steps), n_series)
+    y = np.sin(2 * np.pi * t / 24) + rng.normal(scale=0.3, size=len(t)).cumsum() * 0.01
+    panel = pd.DataFrame({
+        "od": np.repeat(np.arange(n_series), steps), "t": t, "y": np.roll(y, -1),
+        "pred": y + rng.normal(scale=0.05, size=len(t)), "split": np.where(t < 800, "train", "test"),
+    })
+
+    def run_panel() -> Any:
+        r = audit(panel, "y", task="regression", pred="pred", groups="od", time="t", split="split",
+                  season="auto", include_ewma=True, ar_lags=5, n_boot=500, seed=0)
+        return [r.verdict, *(c.status for c in r.checks)]
+
+    with _backend.use("python"):
+        py_ms, py_res = _timed(run_panel, max(1, min(runs, 3)))
+    with _backend.use("native"):
+        nat_ms, nat_res = _timed(run_panel, max(1, min(runs, 3)))
+    assert py_res == nat_res, (py_res, nat_res)
+    name = "audit() all baselines, 785 x 1,000 panel"
+    print(f"{name:<52} {py_ms:>10.2f} ms {nat_ms:>10.2f} ms {py_ms / nat_ms:>7.1f}x")
+    rows.append({"workload": name, "python_ms": round(py_ms, 3), "native_ms": round(nat_ms, 3),
+                 "speedup": round(py_ms / nat_ms, 1)})
     return rows
 
 
@@ -142,6 +198,7 @@ def main() -> None:
 
     print(f"{'workload':<52} {'python':>13} {'native':>13} {'speedup':>8}")
     kernels = bench_kernels(args.runs)
+    phase2 = bench_phase2(args.runs)
     end_to_end = bench_audit(args.runs)
     print("\nthread scaling: f1 bootstrap, 1,000,000 rows, block 20, 2,000 draws")
     threads = bench_threads(args.runs)
@@ -153,6 +210,7 @@ def main() -> None:
         "native_build": _native.build_info(),
         "runs": args.runs,
         "kernels": kernels,
+        "phase2_kernels": phase2,
         "audit": end_to_end,
         "thread_scaling": threads,
     }

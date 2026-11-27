@@ -13,9 +13,54 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
+from . import _backend
+
+# pandas 3.0 changed EWM with adjust=False and com == 1 (span 3): after NaN gaps the new
+# observation's weight is re-derived as 1 - old_wt instead of staying alpha. The native kernel
+# follows whichever pandas is installed.
+_PANDAS_EWM_COM1_UPDATE = int(pd.__version__.split(".")[0]) >= 3
+
+# --- native dispatch helpers ----------------------------------------------------
+
+
+def _native_inputs(
+    target: pd.Series, groups: pd.Series | None
+) -> tuple[np.ndarray, np.ndarray | None] | None:
+    """(values_f64, group_codes_i64) for the native engine, or None to use the pandas path.
+
+    Only plain NumPy dtypes go native: float64 or integer targets, and integer/bool group codes
+    aligned with the target (pandas would otherwise align them by index). Bool targets (pandas
+    shifts them to object dtype) and extension dtypes such as nullable ``Int64`` / ``Float64``
+    (whose ``pd.NA`` pandas treats as a missing group or value) keep the pandas path.
+    """
+    if _backend.native is None:
+        return None
+    numeric = target.dtype == np.float64 or target.dtype.kind in "iu"
+    if not isinstance(target.dtype, np.dtype) or not numeric:
+        return None
+    if groups is not None:
+        if not isinstance(groups.dtype, np.dtype) or groups.dtype.kind not in "iub":
+            return None
+        if not groups.index.equals(target.index):
+            return None
+        if groups.dtype.kind == "u" and len(groups) and int(groups.max()) > np.iinfo(np.int64).max:
+            return None
+    values = np.ascontiguousarray(target.to_numpy(dtype=np.float64))
+    codes = None if groups is None else np.ascontiguousarray(groups.to_numpy(dtype=np.int64))
+    return values, codes
+
+
+def _as_series(values: np.ndarray, like: pd.Series, *, keep_name: bool = True) -> pd.Series:
+    name = like.name if keep_name else None
+    return cast(pd.Series, pd.Series(values, index=like.index, dtype=float, name=name))
 
 def lag_target(target: pd.Series, groups: pd.Series | None, k: int) -> pd.Series:
     """target[t - k] within each group (NaN where the group has no history yet)."""
+    # pandas keeps an integer dtype for shift(0); every other lag of a numeric series is float64.
+    use_native = k > 0 or (k == 0 and target.dtype == np.float64)
+    native_in = _native_inputs(target, groups) if use_native else None
+    if native_in is not None and _backend.native is not None:
+        return _as_series(_backend.native.lag(native_in[0], native_in[1], int(k)), target)
     if groups is None:
         return target.shift(k)
     return target.groupby(groups, sort=False).shift(k)
@@ -38,6 +83,11 @@ def moving_average(
     target: pd.Series, groups: pd.Series | None, horizon: int, window: int
 ) -> pd.Series:
     """Mean of the last ``window`` observed values. For a 0/1 label this is a score in [0, 1]."""
+    native_in = _native_inputs(target, groups) if window >= 1 and horizon >= 0 else None
+    if native_in is not None and _backend.native is not None:
+        values, codes = native_in
+        observed_n = _backend.native.lag(values, codes, int(horizon))
+        return _as_series(_backend.native.rolling_mean(observed_n, codes, int(window), int(window)), target)
     observed = lag_target(target, groups, horizon)
     if groups is None:
         return observed.rolling(window, min_periods=window).mean()
@@ -49,6 +99,12 @@ def ewma(
     target: pd.Series, groups: pd.Series | None, horizon: int, span: int
 ) -> pd.Series:
     """Exponentially weighted moving average over observed values."""
+    native_in = _native_inputs(target, groups) if span >= 1 and horizon >= 0 else None
+    if native_in is not None and _backend.native is not None:
+        values, codes = native_in
+        observed_n = _backend.native.lag(values, codes, int(horizon))
+        smoothed = _backend.native.ewm_mean(observed_n, codes, float(span), _PANDAS_EWM_COM1_UPDATE)
+        return _as_series(smoothed, target)
     observed = lag_target(target, groups, horizon)
     if groups is None:
         return observed.ewm(span=span, adjust=False, min_periods=1).mean()
@@ -89,6 +145,17 @@ def linear_ar(
     """Causal Ridge AR(p) fit strictly on ``fit_mask`` using observed lags [h .. h+p-1]."""
     if lags < 1:
         raise ValueError("ar_lags must be >= 1")
+    native_in = _native_inputs(target, groups) if horizon >= 0 and len(fit_mask) == len(target) else None
+    if native_in is not None and _backend.native is not None:
+        try:
+            preds_n = _backend.native.linear_ar(
+                native_in[0], native_in[1], int(horizon),
+                np.ascontiguousarray(fit_mask.to_numpy(dtype=bool), dtype=np.uint8),
+                int(lags), float(alpha), task == "classification",
+            )
+            return _as_series(preds_n, target, keep_name=False)
+        except RuntimeError:
+            pass  # singular system: NumPy's least-squares fallback below
     lag_cols = [lag_target(target, groups, horizon + k).to_numpy(dtype=np.float64) for k in range(lags)]
     X = np.column_stack([*lag_cols, np.ones(len(target), dtype=np.float64)])
     y = target.to_numpy(dtype=np.float64)
@@ -134,6 +201,11 @@ def estimate_season(
     first decays below 0.5 and then rises again by at least 0.2 to a peak of 0.3 or more;
     smooth trending series (random walks) have no such rise and return None.
     """
+    native_in = _native_inputs(target, groups) if fit_mask.index.equals(target.index) else None
+    if native_in is not None and _backend.native is not None and max_lag >= 0 and min_lag >= 0:
+        mask = np.ascontiguousarray(fit_mask.to_numpy(dtype=bool), dtype=np.uint8)
+        season = _backend.native.estimate_season(native_in[0], native_in[1], mask, int(max_lag), int(min_lag))
+        return None if season is None else int(season)
     fit = target.where(fit_mask)
     keys = groups if groups is not None else pd.Series(0, index=target.index)
     series = [s.dropna().to_numpy(float) for _, s in fit.groupby(keys, sort=False)]

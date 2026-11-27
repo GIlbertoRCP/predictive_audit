@@ -1,6 +1,6 @@
 # Native C++ Core — Implementation Plan
 
-**Status:** Phases 0–1 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
+**Status:** Phases 0–2 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
 
 ## Goal
 
@@ -114,17 +114,17 @@ Port `metrics.py` behind the same Python signatures:
 
 ### Phase 2: Baselines, rank metrics, reshape (≈2 weeks)
 
-- [ ] Group-aware `lag_target` / `persistence` / `seasonal_naive` on contiguous group runs.
-- [ ] `moving_average` matching pandas `rolling(window, min_periods=window).mean()` (its add/remove running sum; tolerance 1e-12).
-- [ ] `ewma` matching pandas `ewm(span, adjust=False, min_periods=1)` **including its NaN semantics** (`ignore_na=False`).
-- [ ] `constant`, `linear_ar` (per-group Ridge with pooled fallback below `lags + 5` rows; fit groups in parallel).
-- [ ] `estimate_season` (pooled FFT autocovariance, same decay/peak rules).
-- [ ] `optimal_threshold` (unique values or `np.quantile` candidates).
-- [ ] `roc_auc` / `pr_auc` matching sklearn `roc_auc_score` / `average_precision_score` tie handling.
-- [ ] **Rank-metric bootstrap rewrite:** sort scores once; each draw becomes a vector of multiplicities, and AUC/AP become an O(n) weighted sweep over the precomputed order. This replaces O(n_boot · n log n) sklearn calls.
-- [ ] `wide_to_long`.
+- [x] Group-aware `lag_target` / `persistence` / `seasonal_naive`, following pandas `groupby(sort=False)`: groups in order of first appearance, rows need not be contiguous. Groups run in parallel.
+- [x] `moving_average`: pandas' `roll_mean` reproduced exactly, including Kahan add/remove compensation, the constant-window guard (GH#42064), the all-positive/all-negative sign guards, and ±inf treated as NaN. **Bit-identical.**
+- [x] `ewma`: pandas `ewm(span, adjust=False, min_periods=1)`, including NaN gaps and the `com == 1` special case. Bit-identical wherever pandas doesn't fuse `a*b + c` into an FMA. pandas' own arm64 wheels do fuse, so its result there differs by ~1e-13. The native kernel never fuses, so it gives the same answer on every platform. pandas 3.0 also changed span-3 (`com == 1`) weighting after NaN gaps, so the kernel follows the installed pandas major version (CI's Python 3.10 job runs pandas 2.3).
+- [x] `linear_ar`: per-group Ridge with pooled fallback below `lags + 5` rows, groups fit in parallel. LU with partial pivoting, like LAPACK `dgesv`. Agrees with NumPy to about cond(X'X + αI)·ε, since BLAS/LAPACK order is unspecified. A singular system raises and falls back to NumPy's least squares. `constant` stays in Python (a single mean).
+- [x] `estimate_season`: pooled FFT autocovariance via pocketfft, same decay/peak rules. Same period on every tested input.
+- [x] `optimal_threshold` in O(n log n): sort positive and negative scores once, then count by binary search per candidate (previously O(candidates · n)). **Bit-identical.**
+- [x] `roc_auc` / `pr_auc` reproduce scikit-learn's `roc_curve(drop_intermediate=True)` + trapezoid and `precision_recall_curve` + step integral. **Bit-identical.** Labels other than 0/1 or non-finite scores fall back to scikit-learn, which defines those cases.
+- [x] **Rank-metric bootstrap rewrite:** scores sorted once; each draw becomes per-row multiplicities, and AUC/AP an O(n) weighted sweep. Curve points depend only on counts per distinct score, so this is **bit-identical** to calling scikit-learn on each resampled array. 130–170× faster.
+- [ ] ~~`wide_to_long`~~ moved to Phase 4: from Python it still has to build a DataFrame, so there's nothing to gain until the standalone CLI reads wide files directly.
 
-**Done when:** these pass reference parity tests, and the rank-metric bootstrap shows its speedup in the benchmarks.
+**Result:** at Case 03 scale (785 series × 1,000 steps, every baseline on, automatic season), `audit()` goes from 3.6 s to 0.21 s (17×) with identical verdicts. Single-series audits on 500k rows are still only 1.1–1.3× faster: pandas sorting and the leakage checks dominate, and those are Phase 3.
 
 ### Phase 3: Checks and the full pipeline in C++ (≈2–3 weeks)
 

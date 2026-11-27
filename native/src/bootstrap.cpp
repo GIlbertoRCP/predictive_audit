@@ -3,33 +3,17 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <complex>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
 
 #include "paudit/numeric.hpp"
 #include "paudit/parallel.hpp"
+#include "paudit/rank.hpp"
 #include "paudit/rng.hpp"
 
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#pragma GCC diagnostic ignored "-Wconversion"
-#pragma GCC diagnostic ignored "-Wshadow"
-#pragma GCC diagnostic ignored "-Wdouble-promotion"
-#pragma GCC diagnostic ignored "-Wnull-dereference"
-#elif defined(_MSC_VER)
-#pragma warning(push, 0)
-#endif
-#define POCKETFFT_NO_MULTITHREADING
-#include <pocketfft_hdronly.h>
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+#include "confusion.hpp"
+#include "fft.hpp"
 
 namespace paudit {
 namespace {
@@ -110,26 +94,6 @@ void confusion_row(double y, double p, double thr, double* out) noexcept {
   out[3] = (!t && !q) ? 1.0 : 0.0;
 }
 
-double f1_from(double tp, double fp, double fn) noexcept {
-  const double d = 2.0 * tp + fp + fn;
-  return d > 0.0 ? 2.0 * tp / d : 0.0;
-}
-
-double balanced_from(double tp, double fp, double fn, double tn) noexcept {
-  const double pos = tp + fn;
-  const double neg = tn + fp;
-  const double tpr = pos > 0.0 ? tp / pos : 0.0;
-  const double tnr = neg > 0.0 ? tn / neg : 0.0;
-  if (pos > 0.0 && neg > 0.0) return 0.5 * (tpr + tnr);
-  if (pos > 0.0 && neg == 0.0) return tpr;
-  return tnr;
-}
-
-double mcc_from(double tp, double fp, double fn, double tn) noexcept {
-  const double d = std::sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn));
-  return d > 0.0 ? (tp * tn - fp * fn) / d : 0.0;
-}
-
 double r2_from(double e, double sst) noexcept {
   if (sst == 0.0) return e == 0.0 ? 1.0 : 0.0;
   return 1.0 - e / sst;
@@ -175,6 +139,20 @@ std::vector<double> interleaved_prefix(std::size_t length, Value value) {
     }
   }
   return prefix;
+}
+
+/// 2.5% / 97.5% percentiles of the non-NaN bootstrap differences (np.percentile, linear).
+Interval interval_of(const std::vector<double>& diffs) {
+  std::vector<double> finite;
+  finite.reserve(diffs.size());
+  for (const double d : diffs) {
+    if (!std::isnan(d)) finite.push_back(d);
+  }
+  if (finite.empty()) return {kNaN, kNaN};
+  std::vector<double> copy = finite;
+  const double lo = numeric::percentile_linear(finite, 2.5);
+  const double hi = numeric::percentile_linear(copy, 97.5);
+  return {lo, hi};
 }
 
 template <std::size_t K, class RowStats, class Eval>
@@ -266,16 +244,75 @@ Interval bootstrap_impl(std::size_t n, RowStats row_stats, Eval eval, std::int64
     });
   }
 
-  std::vector<double> finite;
-  finite.reserve(n_boot);
-  for (const double d : diffs) {
-    if (!std::isnan(d)) finite.push_back(d);
+  return interval_of(diffs);
+}
+
+/// Rank-metric (ROC-AUC / average precision) bootstrap. Python resamples rows and calls
+/// sklearn per draw; here each draw becomes per-row multiplicities and the metric is an O(n)
+/// sweep over a score order computed once, with results identical to the resampled sklearn call.
+Interval rank_bootstrap(Metric metric, std::span<const double> y, std::span<const double> model,
+                        std::span<const double> baseline, std::int64_t block, std::size_t n_boot,
+                        std::uint64_t seed, GroupCodes groups, const PanelInfo& panel) {
+  const std::size_t n = y.size();
+  rng::Pcg64 gen(seed);
+  const ScoreOrder order_m = score_order(model);
+  const ScoreOrder order_b = score_order(baseline);
+  auto score_fn = [metric](std::span<const double> yy, const ScoreOrder& o,
+                           std::span<const std::uint32_t> w) {
+    return metric == Metric::roc_auc ? roc_auc(yy, o, w) : average_precision(yy, o, w);
+  };
+  auto clamp_block = [block](std::size_t len) {
+    const auto b = std::min<std::int64_t>(block, static_cast<std::int64_t>(len));
+    return static_cast<std::size_t>(std::max<std::int64_t>(1, b));
+  };
+
+  const std::size_t span_len = panel.aligned ? panel.n_times : n;  // positions covered per draw
+  const std::size_t b_len = clamp_block(span_len);
+  const std::size_t n_blocks = (span_len + b_len - 1) / b_len;
+  CircularLayout layout;
+  std::size_t high = span_len;
+  if (!panel.aligned && groups) {
+    layout = group_circular_layout(*groups, b_len - 1);
+    high = layout.starts.size();
   }
-  if (finite.empty()) return {kNaN, kNaN};
-  std::vector<double> copy = finite;
-  const double lo = numeric::percentile_linear(finite, 2.5);
-  const double hi = numeric::percentile_linear(copy, 97.5);
-  return {lo, hi};
+
+  std::vector<double> diffs(n_boot, kNaN);
+  const std::size_t chunk = std::max<std::size_t>(1, std::min(n_boot, kMaxStartsPerChunk / n_blocks));
+  std::vector<std::int64_t> starts(chunk * n_blocks);
+  for (std::size_t i0 = 0; i0 < n_boot; i0 += chunk) {
+    const std::size_t sz = std::min(chunk, n_boot - i0);
+    rng::integers(gen, high, std::span<std::int64_t>(starts.data(), sz * n_blocks));
+    parallel::parallel_for(sz, 1, [&](std::size_t begin, std::size_t end) {
+      std::vector<std::uint32_t> weights(n);
+      std::vector<std::uint32_t> per_time(panel.aligned ? panel.n_times : 0);
+      for (std::size_t d = begin; d < end; ++d) {
+        const std::int64_t* s = starts.data() + d * n_blocks;
+        if (panel.aligned) {
+          std::fill(per_time.begin(), per_time.end(), 0U);
+          for (std::size_t pos = 0; pos < span_len; ++pos) {
+            const auto t0 = static_cast<std::size_t>(s[pos / b_len]);
+            ++per_time[(t0 + pos % b_len) % span_len];
+          }
+          for (std::size_t i = 0; i < n; ++i)
+            weights[i] = per_time[static_cast<std::size_t>(panel.time_index[i])];
+        } else {
+          std::fill(weights.begin(), weights.end(), 0U);
+          for (std::size_t pos = 0; pos < n; ++pos) {
+            const auto raw = static_cast<std::size_t>(s[pos / b_len]);
+            const std::size_t off = pos % b_len;
+            if (groups) {
+              const auto start = static_cast<std::size_t>(layout.starts[raw]);
+              ++weights[static_cast<std::size_t>(layout.gather[start + off])];
+            } else {
+              ++weights[(raw + off) % n];
+            }
+          }
+        }
+        diffs[i0 + d] = score_fn(y, order_m, weights) - score_fn(y, order_b, weights);
+      }
+    });
+  }
+  return interval_of(diffs);
 }
 
 }  // namespace
@@ -389,18 +426,7 @@ std::size_t estimate_block_length(std::span<const double> x, std::optional<std::
 
   // O(n log n) autocovariance: irfft(|rfft(xc, n_fft)|^2, n_fft)[:n] / n, as NumPy computes it.
   const auto n_fft = std::size_t{1} << static_cast<unsigned>(std::ceil(std::log2(2.0 * nd)));
-  std::vector<double> padded(n_fft, 0.0);
-  std::copy(xc.begin(), xc.end(), padded.begin());
-  std::vector<std::complex<double>> spectrum(n_fft / 2 + 1);
-  const pocketfft::shape_t shape{n_fft};
-  const pocketfft::stride_t real_stride{static_cast<std::ptrdiff_t>(sizeof(double))};
-  const pocketfft::stride_t complex_stride{static_cast<std::ptrdiff_t>(sizeof(std::complex<double>))};
-  pocketfft::r2c(shape, real_stride, complex_stride, 0, pocketfft::FORWARD, padded.data(), spectrum.data(),
-                 1.0);
-  for (auto& c : spectrum) c = std::complex<double>(c.real() * c.real() + c.imag() * c.imag(), 0.0);
-  std::vector<double> circ(n_fft);
-  pocketfft::c2r(shape, complex_stride, real_stride, 0, pocketfft::BACKWARD, spectrum.data(), circ.data(),
-                 1.0 / static_cast<double>(n_fft));
+  const std::vector<double> circ = detail::circular_autocov(xc, n_fft);
   std::vector<double> acov(n);
   for (std::size_t i = 0; i < n; ++i) acov[i] = circ[i] / nd;
 
@@ -459,12 +485,15 @@ Interval block_bootstrap_diff(Metric metric, std::span<const double> y_true, std
   if (!std::holds_alternative<std::monostate>(times) && times_size(times) != n) {
     throw std::invalid_argument("times must have one entry per row");
   }
-  if (!is_prefix_metric(metric)) {
-    throw std::invalid_argument("rank-metric bootstrap is not implemented natively yet");
-  }
   if (n == 0 || n_boot <= 0) return {kNaN, kNaN};
 
   const PanelInfo panel = detect_aligned_panel(groups, times);
+  if (!is_prefix_metric(metric)) {
+    validate_rank_inputs(y_true, model);
+    validate_rank_inputs(y_true, baseline);
+    return rank_bootstrap(metric, y_true, model, baseline, block, static_cast<std::size_t>(n_boot), seed,
+                          groups, panel);
+  }
   const Inputs in{y_true, model, baseline, threshold};
   const auto nb = static_cast<std::size_t>(n_boot);
 
@@ -520,21 +549,24 @@ Interval block_bootstrap_diff(Metric metric, std::span<const double> y_true, std
       if (metric == Metric::f1) {
         return bootstrap_impl<8>(
             n, rows,
-            [](const Row<8>& s, double) { return f1_from(s[0], s[1], s[2]) - f1_from(s[4], s[5], s[6]); },
+            [](const Row<8>& s, double) {
+              return detail::f1_from(s[0], s[1], s[2]) - detail::f1_from(s[4], s[5], s[6]);
+            },
             block, nb, seed, groups, panel);
       }
       if (metric == Metric::mcc) {
         return bootstrap_impl<8>(
             n, rows,
             [](const Row<8>& s, double) {
-              return mcc_from(s[0], s[1], s[2], s[3]) - mcc_from(s[4], s[5], s[6], s[7]);
+              return detail::mcc_from(s[0], s[1], s[2], s[3]) - detail::mcc_from(s[4], s[5], s[6], s[7]);
             },
             block, nb, seed, groups, panel);
       }
       return bootstrap_impl<8>(
           n, rows,
           [](const Row<8>& s, double) {
-            return balanced_from(s[0], s[1], s[2], s[3]) - balanced_from(s[4], s[5], s[6], s[7]);
+            return detail::balanced_accuracy_from(s[0], s[1], s[2], s[3]) -
+                   detail::balanced_accuracy_from(s[4], s[5], s[6], s[7]);
           },
           block, nb, seed, groups, panel);
     }
