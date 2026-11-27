@@ -202,7 +202,8 @@ std::vector<double> rolling_mean(std::span<const double> values, GroupCodes grou
   return out;
 }
 
-std::vector<double> ewm_mean(std::span<const double> values, GroupCodes groups, double span) {
+std::vector<double> ewm_mean(std::span<const double> values, GroupCodes groups, double span,
+                             bool com1_update) {
   if (!(span >= 1.0)) throw std::invalid_argument("span must be >= 1");
   const GroupRows g = group_rows(values.size(), groups);
   std::vector<double> out(values.size(), kNaN);
@@ -225,7 +226,7 @@ std::vector<double> ewm_mean(std::span<const double> values, GroupCodes groups, 
         old_wt *= old_wt_factor;  // is_observation or not ignore_na (always true here)
         if (is_observation) {
           if (weighted != cur) {
-            if (com == 1.0) new_wt = 1.0 - old_wt;  // not adjust and com == 1
+            if (com1_update && com == 1.0) new_wt = 1.0 - old_wt;  // pandas >= 3.0: not adjust and com == 1
             weighted = old_wt * weighted + new_wt * cur;
             weighted /= (old_wt + new_wt);
           }

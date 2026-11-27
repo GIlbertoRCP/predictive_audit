@@ -56,6 +56,15 @@ TEST_CASE("ewm with adjust=False matches the recursive definition", "[baselines]
   CHECK_THAT(out[2], WithinAbs(0.6 * out[1] + 0.4 * 4.0, 1e-15));
 }
 
+TEST_CASE("span 3 after a NaN gap follows pandas 3.0 or 2.x weighting", "[baselines]") {
+  const std::vector<double> v{1.0, kNaN, 3.0};  // com = 1, alpha = 0.5
+  // After the gap old_wt = 0.25. pandas 3.0: new_wt = 1 - old_wt = 0.75; pandas 2.x keeps 0.5.
+  const auto v3 = paudit::ewm_mean(v, std::nullopt, 3.0, true);
+  const auto v2 = paudit::ewm_mean(v, std::nullopt, 3.0, false);
+  CHECK_THAT(v3[2], WithinAbs((0.25 * 1.0 + 0.75 * 3.0) / 1.0, 1e-15));
+  CHECK_THAT(v2[2], WithinAbs((0.25 * 1.0 + 0.5 * 3.0) / 0.75, 1e-15));
+}
+
 TEST_CASE("linear AR recovers an exact AR(1)", "[baselines]") {
   std::vector<double> y(200);
   y[0] = 1.0;

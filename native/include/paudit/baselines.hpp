@@ -34,7 +34,10 @@ struct GroupRows {
                                                std::size_t window, std::size_t min_periods);
 
 /// `values.groupby(groups).ewm(span=span, adjust=False, min_periods=1).mean()` (ignore_na=False).
-[[nodiscard]] std::vector<double> ewm_mean(std::span<const double> values, GroupCodes groups, double span);
+/// `com1_update` reproduces pandas >= 3.0, which for com == 1 (span 3) re-derives the new weight
+/// as 1 - old_wt after NaN gaps; pandas 2.x keeps alpha. Pass false to match pandas 2.x.
+[[nodiscard]] std::vector<double> ewm_mean(std::span<const double> values, GroupCodes groups, double span,
+                                           bool com1_update = true);
 
 /// predictive_audit.baselines.linear_ar: causal Ridge AR(p) on observed lags [h, h + p), with an
 /// unpenalized intercept, fit on `fit_mask` rows; per-group weights when a group has at least

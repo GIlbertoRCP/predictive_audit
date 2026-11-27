@@ -219,15 +219,15 @@ NB_MODULE(_native, m) {
 
   m.def(
       "ewm_mean",
-      [](const F64& values, const std::optional<I64>& groups, double span) {
+      [](const F64& values, const std::optional<I64>& groups, double span, bool com1_update) {
         std::vector<double> out;
         {
           const nb::gil_scoped_release release;
-          out = paudit::ewm_mean(span_of(values), groups_of(groups), span);
+          out = paudit::ewm_mean(span_of(values), groups_of(groups), span, com1_update);
         }
         return to_numpy(std::move(out));
       },
-      "values"_a, "groups"_a.none(), "span"_a);
+      "values"_a, "groups"_a.none(), "span"_a, "com1_update"_a = true);
 
   m.def(
       "linear_ar",

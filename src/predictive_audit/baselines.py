@@ -15,6 +15,11 @@ import pandas as pd
 
 from . import _backend
 
+# pandas 3.0 changed EWM with adjust=False and com == 1 (span 3): after NaN gaps the new
+# observation's weight is re-derived as 1 - old_wt instead of staying alpha. The native kernel
+# follows whichever pandas is installed.
+_PANDAS_EWM_COM1_UPDATE = int(pd.__version__.split(".")[0]) >= 3
+
 # --- native dispatch helpers ----------------------------------------------------
 
 
@@ -98,7 +103,8 @@ def ewma(
     if native_in is not None and _backend.native is not None:
         values, codes = native_in
         observed_n = _backend.native.lag(values, codes, int(horizon))
-        return _as_series(_backend.native.ewm_mean(observed_n, codes, float(span)), target)
+        smoothed = _backend.native.ewm_mean(observed_n, codes, float(span), _PANDAS_EWM_COM1_UPDATE)
+        return _as_series(smoothed, target)
     observed = lag_target(target, groups, horizon)
     if groups is None:
         return observed.ewm(span=span, adjust=False, min_periods=1).mean()
