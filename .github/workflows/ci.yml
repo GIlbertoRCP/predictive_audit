@@ -74,19 +74,24 @@ jobs:
           "$bin" --build-info
 
   sanitizers:
+    name: sanitizers (${{ matrix.sanitize }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: ["address,undefined", "thread"]
     steps:
       - uses: actions/checkout@v4
-      - name: Configure with ASan + UBSan (clang)
+      - name: Configure with -fsanitize=${{ matrix.sanitize }} (clang)
         env:
           CXX: clang++
         run: >
-          cmake -S native -B build/asan -DCMAKE_BUILD_TYPE=Debug
-          -DPAUDIT_WERROR=ON -DPAUDIT_SANITIZE=address,undefined
+          cmake -S native -B build/san -DCMAKE_BUILD_TYPE=Debug
+          -DPAUDIT_WERROR=ON -DPAUDIT_SANITIZE=${{ matrix.sanitize }}
       - name: Build
-        run: cmake --build build/asan --parallel
+        run: cmake --build build/san --parallel
       - name: Unit tests
-        run: ctest --test-dir build/asan --output-on-failure
+        run: ctest --test-dir build/san --output-on-failure
 
   build:
     name: wheel (${{ matrix.os }})

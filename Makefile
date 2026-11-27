@@ -1,4 +1,4 @@
-.PHONY: test test-both cov lint typecheck bench site check native native-test native-asan format
+.PHONY: test test-both cov lint typecheck bench bench-native site check native native-test native-asan native-tsan format
 
 test:
 	uv run pytest -v
@@ -36,6 +36,14 @@ native-asan:
 	cmake -S native -B build/asan -DCMAKE_BUILD_TYPE=Debug -DPAUDIT_WERROR=ON -DPAUDIT_SANITIZE=address,undefined
 	cmake --build build/asan --parallel
 	ctest --test-dir build/asan --output-on-failure
+
+native-tsan:
+	cmake -S native -B build/tsan -DCMAKE_BUILD_TYPE=Debug -DPAUDIT_WERROR=ON -DPAUDIT_SANITIZE=thread
+	cmake --build build/tsan --parallel
+	ctest --test-dir build/tsan --output-on-failure
+
+bench-native:
+	uv run python benchmarks/bench_native.py --runs 15 --out benchmarks/native_kernels.json
 
 format:
 	find native \( -name '*.cpp' -o -name '*.hpp' \) | xargs uvx clang-format==19.1.7 -i

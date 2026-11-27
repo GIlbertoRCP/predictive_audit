@@ -28,16 +28,36 @@ set(PAUDIT_SANITIZE "" CACHE STRING "Comma-separated sanitizers, e.g. address,un
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(PauditWarnings)
 include(PauditSanitizers)
+include(FetchContent)
+
+# pocketfft (header-only C++ branch): the same FFT NumPy 2.x uses, pinned by commit.
+FetchContent_Declare(
+  pocketfft
+  GIT_REPOSITORY https://github.com/mreineck/pocketfft.git
+  GIT_TAG 4d865cba24359b05b37da4e75aee24498c3b78e7
+  SOURCE_SUBDIR do-not-add-subdirectory
+)
+FetchContent_MakeAvailable(pocketfft)
 
 # --- core library -------------------------------------------------------------
 add_library(paudit STATIC
+  src/bootstrap.cpp
+  src/inference.cpp
+  src/metrics.cpp
+  src/parallel.cpp
+  src/rng.cpp
   src/version.cpp
 )
 add_library(paudit::paudit ALIAS paudit)
 target_include_directories(paudit PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
 )
+target_include_directories(paudit SYSTEM PRIVATE ${pocketfft_SOURCE_DIR})
 target_compile_features(paudit PUBLIC cxx_std_20)
+# Never fuse a*b+c into FMA: keeps results identical to NumPy and across CPUs.
+target_compile_options(paudit PUBLIC $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-ffp-contract=off>)
+find_package(Threads REQUIRED)
+target_link_libraries(paudit PUBLIC Threads::Threads)
 target_compile_definitions(paudit PRIVATE
   PAUDIT_VERSION="${PROJECT_VERSION}"
   PAUDIT_BUILD_TYPE="$<CONFIG>"
@@ -73,7 +93,6 @@ endif()
 
 # --- tests --------------------------------------------------------------------
 if(PAUDIT_BUILD_TESTS)
-  include(FetchContent)
   FetchContent_Declare(
     Catch2
     GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -85,7 +104,15 @@ if(PAUDIT_BUILD_TESTS)
   FetchContent_MakeAvailable(Catch2)
 
   enable_testing()
-  add_executable(paudit_tests tests/test_version.cpp)
+  add_executable(paudit_tests
+    tests/test_bootstrap.cpp
+    tests/test_inference.cpp
+    tests/test_metrics.cpp
+    tests/test_numeric.cpp
+    tests/test_parallel.cpp
+    tests/test_rng.cpp
+    tests/test_version.cpp
+  )
   target_link_libraries(paudit_tests PRIVATE paudit::paudit Catch2::Catch2WithMain)
   paudit_set_warnings(paudit_tests)
   paudit_enable_sanitizers(paudit_tests)

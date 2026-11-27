@@ -1,6 +1,10 @@
 """Metrics, prefix-sum vectorized block bootstrap, Diebold-Mariano HAC tests, and FDR control.
 
 All metrics are oriented so that higher is better in ``score`` (error metrics are negated).
+
+Each public kernel dispatches to the native C++ engine when it is active (see ``_backend``) and
+otherwise runs the pure-Python reference body below it. The native engine reproduces NumPy's
+random draws and summation order, so both paths return the same numbers.
 """
 
 from __future__ import annotations
@@ -11,6 +15,8 @@ from typing import Any
 import numpy as np
 from scipy import stats as sp_stats
 from sklearn import metrics as skm
+
+from . import _backend
 
 CLASSIFICATION: tuple[str, ...] = (
     "f1",
@@ -38,6 +44,58 @@ _PREFIX_METRICS: set[str] = {
 }
 
 
+# --- native dispatch helpers ----------------------------------------------------
+
+_INT64_MAX = np.iinfo(np.int64).max
+_NativePanelArgs = tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]
+
+
+def _f64(x: Any) -> np.ndarray:
+    return np.ascontiguousarray(x, dtype=np.float64)
+
+
+def _as_int64(x: np.ndarray) -> np.ndarray | None:
+    """Exact int64 view of an integer/bool array, or None when values do not fit."""
+    if x.dtype.kind == "u" and x.size and int(x.max()) > _INT64_MAX:
+        return None
+    return np.ascontiguousarray(x, dtype=np.int64)
+
+
+def _native_panel_args(groups: np.ndarray | None, times: np.ndarray | None) -> _NativePanelArgs | None:
+    """(groups_i64, times_i64, times_f64) for the native engine, or None to use the Python path.
+
+    Only dtypes whose equality and ordering semantics are identical in C++ are sent natively:
+    integer/bool group codes; integer, bool, float, or NaT-free datetime/timedelta times.
+    """
+    g_out: np.ndarray | None = None
+    if groups is not None:
+        g = np.asarray(groups)
+        if g.dtype.kind not in "iub":
+            return None
+        g_out = _as_int64(g)
+        if g_out is None:
+            return None
+    if times is None:
+        return g_out, None, None
+    t = np.asarray(times)
+    if t.dtype.kind in "iub":
+        ti = _as_int64(t)
+        return None if ti is None else (g_out, ti, None)
+    if t.dtype.kind == "f":
+        return g_out, None, _f64(t)
+    if t.dtype.kind in "mM" and not np.isnat(t).any():
+        return g_out, np.ascontiguousarray(t.view(np.int64)), None
+    return None
+
+
+def _native_seed(seed: Any) -> int | None:
+    try:
+        value = int(seed)
+    except (TypeError, ValueError):
+        return None
+    return value if 0 <= value < 2**64 else None
+
+
 def _labels(y_score: np.ndarray, threshold: float = 0.5) -> np.ndarray:
     return (y_score >= threshold).astype(np.int8)
 
@@ -58,6 +116,9 @@ def compute(
     name: str, y_true: np.ndarray, y_pred: np.ndarray, *, threshold: float = 0.5
 ) -> float:
     """Raw metric value (MAE/RMSE/sMAPE/Brier stay as errors here)."""
+    native = _backend.native
+    if native is not None and name in _PREFIX_METRICS:
+        return float(native.compute(name, _f64(y_true), _f64(y_pred), float(threshold)))
     yt = np.asarray(y_true, dtype=np.float64)
     yp = np.asarray(y_pred, dtype=np.float64)
     if name == "f1":
@@ -345,6 +406,9 @@ def estimate_block_length(x: np.ndarray, *, max_block: int | None = None) -> int
     Estimates the correlation scale directly from the sample autocovariances of ``x``
     using an O(T log T) FFT and flat-top trapezoid lag window.
     """
+    native = _backend.native
+    if native is not None:
+        return int(native.estimate_block_length(_f64(np.ravel(x)), max_block))
     arr = np.asarray(x, dtype=np.float64)
     arr = arr[np.isfinite(arr)]
     n = len(arr)
@@ -394,6 +458,11 @@ def default_block_length(
     times: np.ndarray | None = None,
 ) -> int:
     """Choose a sensible block length based on effective series length (never n_groups * T)."""
+    native = _backend.native
+    if native is not None:
+        args = _native_panel_args(groups, times)
+        if args is not None:
+            return int(native.default_block_length(int(n_total), *args))
     is_panel, _, n_times = _is_aligned_panel(groups, times)
     if is_panel:
         t_eff = n_times
@@ -430,6 +499,16 @@ def block_bootstrap_diff(
       - Unaligned multi-series data restricts block starts strictly within each group so
         blocks never cross series boundaries.
     """
+    native = _backend.native
+    if native is not None and metric in _PREFIX_METRICS:
+        args = _native_panel_args(groups, times)
+        native_seed = _native_seed(seed)
+        if args is not None and native_seed is not None:
+            lo_n, hi_n = native.block_bootstrap_diff(
+                metric, _f64(y_true), _f64(model), _f64(baseline), int(block), int(n_boot), native_seed,
+                *args, float(threshold),
+            )
+            return float(lo_n), float(hi_n)
     rng = np.random.default_rng(seed)
     yt = np.asarray(y_true, dtype=np.float64)
     pm = np.asarray(model, dtype=np.float64)
@@ -585,6 +664,14 @@ def diebold_mariano(
     Positive statistic means ``model`` beats ``baseline``. Returns ``(stat, two_sided_p)``
     or ``(nan, nan)`` for non-additive metrics or degenerate series.
     """
+    native = _backend.native
+    if native is not None and metric in _PREFIX_METRICS:
+        args = _native_panel_args(groups, times)
+        if args is not None:
+            stat_n, p_n = native.diebold_mariano(
+                metric, _f64(y_true), _f64(model), _f64(baseline), int(horizon), *args, float(threshold)
+            )
+            return float(stat_n), float(p_n)
     yt = np.asarray(y_true, dtype=np.float64)
     pm = np.asarray(model, dtype=np.float64)
     pb = np.asarray(baseline, dtype=np.float64)
@@ -629,6 +716,9 @@ def diebold_mariano(
 
 def benjamini_hochberg(p_values: Sequence[float]) -> np.ndarray:
     """Benjamini-Hochberg FDR-adjusted q-values (NaNs preserved)."""
+    native = _backend.native
+    if native is not None:
+        return np.asarray(native.benjamini_hochberg(_f64(p_values)), dtype=np.float64)
     p = np.asarray(p_values, dtype=np.float64)
     q = np.full_like(p, np.nan)
     ok = np.isfinite(p)
@@ -649,6 +739,9 @@ def benjamini_hochberg(p_values: Sequence[float]) -> np.ndarray:
 
 def holm_bonferroni(p_values: Sequence[float]) -> np.ndarray:
     """Holm-Bonferroni step-down adjusted p-values (NaNs preserved)."""
+    native = _backend.native
+    if native is not None:
+        return np.asarray(native.holm_bonferroni(_f64(p_values)), dtype=np.float64)
     p = np.asarray(p_values, dtype=np.float64)
     adj_all = np.full_like(p, np.nan)
     ok = np.isfinite(p)

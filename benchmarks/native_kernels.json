@@ -1,0 +1,122 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.5",
+  "numpy": "2.5.4",
+  "native_build": {
+    "version": "0.2.0",
+    "compiler": "clang 21.0.0 (clang-2100.1.1.101)",
+    "build_type": "Release",
+    "cplusplus": 202002,
+    "hardware_threads": 12
+  },
+  "runs": 15,
+  "kernels": [
+    {
+      "workload": "bootstrap mae, 10,000 rows, 500 draws",
+      "python_ms": 0.591,
+      "native_ms": 0.183,
+      "speedup": 3.2
+    },
+    {
+      "workload": "bootstrap f1, 10,000 rows, 500 draws",
+      "python_ms": 1.924,
+      "native_ms": 0.26,
+      "speedup": 7.4
+    },
+    {
+      "workload": "bootstrap mae, 100,000 rows, 500 draws",
+      "python_ms": 2.597,
+      "native_ms": 0.671,
+      "speedup": 3.9
+    },
+    {
+      "workload": "bootstrap f1, 100,000 rows, 500 draws",
+      "python_ms": 9.245,
+      "native_ms": 1.152,
+      "speedup": 8.0
+    },
+    {
+      "workload": "bootstrap mae, 500,000 rows, 500 draws",
+      "python_ms": 10.28,
+      "native_ms": 2.088,
+      "speedup": 4.9
+    },
+    {
+      "workload": "bootstrap f1, 500,000 rows, 500 draws",
+      "python_ms": 43.504,
+      "native_ms": 3.897,
+      "speedup": 11.2
+    },
+    {
+      "workload": "bootstrap mae, 500 x 2,000 aligned panel",
+      "python_ms": 7.284,
+      "native_ms": 2.64,
+      "speedup": 2.8
+    },
+    {
+      "workload": "Diebold-Mariano HAC, 100,000 rows",
+      "python_ms": 0.885,
+      "native_ms": 1.178,
+      "speedup": 0.8
+    },
+    {
+      "workload": "Politis-White block length, 100,000 rows",
+      "python_ms": 2.814,
+      "native_ms": 2.918,
+      "speedup": 1.0
+    }
+  ],
+  "audit": [
+    {
+      "workload": "audit() mae, 10,000 rows (end to end)",
+      "python_ms": 2.757,
+      "native_ms": 2.273,
+      "speedup": 1.2
+    },
+    {
+      "workload": "audit() mae, 500,000 rows (end to end)",
+      "python_ms": 74.329,
+      "native_ms": 69.631,
+      "speedup": 1.1
+    },
+    {
+      "workload": "audit() f1, 10,000 rows (end to end)",
+      "python_ms": 7.926,
+      "native_ms": 6.754,
+      "speedup": 1.2
+    },
+    {
+      "workload": "audit() f1, 500,000 rows (end to end)",
+      "python_ms": 128.251,
+      "native_ms": 117.331,
+      "speedup": 1.1
+    }
+  ],
+  "thread_scaling": [
+    {
+      "threads": 1,
+      "native_ms": 1799.54,
+      "scaling": 1.0
+    },
+    {
+      "threads": 2,
+      "native_ms": 1030.77,
+      "scaling": 1.75
+    },
+    {
+      "threads": 4,
+      "native_ms": 637.58,
+      "scaling": 2.82
+    },
+    {
+      "threads": 8,
+      "native_ms": 462.07,
+      "scaling": 3.89
+    },
+    {
+      "threads": 12,
+      "native_ms": 450.61,
+      "scaling": 3.99
+    }
+  ]
+}
