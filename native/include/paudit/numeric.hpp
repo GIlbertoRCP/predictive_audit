@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -72,7 +73,10 @@ template <class G>
 }
 
 /// `np.mean` of a contiguous float64 array (NaN for empty input, as NumPy returns).
-[[nodiscard]] inline double mean(std::span<const double> x) { return sum(x) / static_cast<double>(x.size()); }
+[[nodiscard]] inline double mean(std::span<const double> x) {
+  if (x.empty()) return std::numeric_limits<double>::quiet_NaN();  // no 0/0 (MSVC C4723)
+  return sum(x) / static_cast<double>(x.size());
+}
 
 /// Exclusive prefix sums with a leading zero: out[0] = 0, out[k] = x[0] + ... + x[k-1].
 /// Sequential accumulation, matching `np.cumsum`.
