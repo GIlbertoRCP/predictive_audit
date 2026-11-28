@@ -463,7 +463,8 @@ std::size_t estimate_block_length(std::span<const double> x, std::optional<std::
                        });
   const double g0_hat =
       acov[0] + 2.0 * numeric::pairwise_sum(bw, [&](std::size_t i) { return weight(i + 1) * acov[i + 1]; });
-  if (g0_hat <= 0.0 || g_hat == 0.0) {
+  // Robust to FFT rounding noise in exact-zero autocovariances (see metrics.estimate_block_length).
+  if (g0_hat <= 1e-10 * acov[0]) {
     return std::max<std::size_t>(1, std::min(static_cast<std::size_t>(std::nearbyint(std::sqrt(nd))), cap));
   }
   const double d_cbb = (4.0 / 3.0) * (g0_hat * g0_hat);

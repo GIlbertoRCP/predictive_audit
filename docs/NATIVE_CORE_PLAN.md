@@ -1,6 +1,6 @@
 # Native C++ Core — Implementation Plan
 
-**Status:** Phases 0–2 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
+**Status:** Phases 0–3 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
 
 ## Goal
 
@@ -128,16 +128,21 @@ Port `metrics.py` behind the same Python signatures:
 
 ### Phase 3: Checks and the full pipeline in C++ (≈2–3 weeks)
 
-- [ ] Columnar `Table` (double columns, group-key codes, time as int64/double/string, split labels).
-- [ ] Sort/group semantics identical to `df.sort_values(group_cols + [time], kind="stable")` + `groupby(...).ngroup()`. That means stable sort, NaN last, and NaN group keys → code −1, which matches pandas' `dropna=True`.
-- [ ] All checks: label memory, beats baselines, reported score, temporal split + embargo + duplicate timestamps, feature leakage (Pearson + Spearman with average ranks), scaler leakage. Port the summary strings verbatim.
-- [ ] `audit(const Table&, const AuditConfig&) -> AuditReport` and `batch_audit` **parallel across groups**, with BH-FDR applied after all groups finish.
-- [ ] Python `audit()` becomes: DataFrame → columns (zero-copy where possible) → native → `AuditReport` dataclass.
-  - `extra_baselines` are converted to columns and passed in.
-  - `extra_checks` keep running in Python; the native call returns `eval_mask` and the evaluation arrays so these callbacks see exactly what they see today.
-- [ ] Drop `scipy` and `scikit-learn` from runtime dependencies (they move to the `dev` group for the reference oracle). Re-measure import time.
+- [x] Columnar input (`AuditColumns`) instead of a general `Table` class. Python keeps only cheap column extraction:
+  - integer and float sort keys pass through;
+  - datetimes pass through as int64 ticks;
+  - strings, categoricals and objects become `pd.factorize(sort=True)` codes;
+  - split labels become one train/test/other code per distinct label.
 
-**Done when:** all six `cases/*/run.py` produce identical verdicts and tables on the native backend, and Case 03's `batch_audit` shows its thread-scaling numbers.
+  Every audit use of time (sorting, duplicate detection, panel alignment) depends only on order and equality, so codes give identical results; panel alignment was checked case by case. NaN group keys, NaT/NaN times, and non-string column labels keep the pandas path.
+- [x] Sort and group semantics identical to `df.sort_values(group_cols + [time], kind="stable")` + `groupby(...).ngroup()`, with an O(n) already-sorted fast path.
+- [x] All six checks in C++, summary strings ported verbatim. Python's f-string number formats (`.3f`, `+.4f`, `.3g`, `.4g`, `g`, `.0%`) are reproduced with `snprintf` plus explicit NaN/inf spelling and tested against CPython output. `std::format` was avoided because it needs macOS 13.3+ for floating point under the macOS 11 wheel target.
+- [x] `audit(AuditColumns, AuditConfig) -> AuditReport`, and `audit_each_series` for `batch_audit`, running series in parallel (BH-FDR in Python afterwards, as before). Data errors carry the reference's messages, raised in the reference's order.
+- [x] Python `audit()` / `batch_audit()` dispatch to the native pipeline. `extra_baselines` are passed as columns; `extra_checks` run in Python on the sorted evaluation rows and arrays the native call returns.
+- [x] SciPy and scikit-learn are imported only on first use by the reference path, and moved to an optional `[reference]` extra (plus the dev group and wheel tests). Package import time: **0.70 s → 0.18 s**.
+- [x] Feature leakage: average ranks via a plain sort (tie order doesn't matter), and all correlations computed in parallel before the reference-order leak decisions.
+
+**Result:** 480 randomized full audits gave identical verdicts and check statuses, with identical numbers and report text apart from the LAPACK/BLAS-bound cases (classification Ridge AR rank metrics, R² near zero), which the parity tests document. Case 01 output is byte-identical. Single-series `audit()` is 3.4–8.3× faster at 10k rows and 2.5–3.5× at 500k (with feature leakage), a 785-series panel audit is 27× faster, and `batch_audit` over 785 series is 34× faster. Found and fixed along the way: `report.to_text()` crashed on non-string prediction column labels (both backends).
 
 ### Phase 4: Standalone CLI (≈2 weeks)
 

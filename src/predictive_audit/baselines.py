@@ -50,6 +50,12 @@ def _native_inputs(
     return values, codes
 
 
+def _ints(*values: object) -> bool:
+    """True when every value is a real integer. Bools and floats keep the pandas path, which
+    rejects or names them its own way (``shift(True)`` raises; ``rolling(True)`` raises)."""
+    return all(isinstance(v, (int, np.integer)) and not isinstance(v, (bool, np.bool_)) for v in values)
+
+
 def _as_series(values: np.ndarray, like: pd.Series, *, keep_name: bool = True) -> pd.Series:
     name = like.name if keep_name else None
     return cast(pd.Series, pd.Series(values, index=like.index, dtype=float, name=name))
@@ -57,7 +63,7 @@ def _as_series(values: np.ndarray, like: pd.Series, *, keep_name: bool = True) -
 def lag_target(target: pd.Series, groups: pd.Series | None, k: int) -> pd.Series:
     """target[t - k] within each group (NaN where the group has no history yet)."""
     # pandas keeps an integer dtype for shift(0); every other lag of a numeric series is float64.
-    use_native = k > 0 or (k == 0 and target.dtype == np.float64)
+    use_native = _ints(k) and (k > 0 or (k == 0 and target.dtype == np.float64))
     native_in = _native_inputs(target, groups) if use_native else None
     if native_in is not None and _backend.native is not None:
         return _as_series(_backend.native.lag(native_in[0], native_in[1], int(k)), target)
@@ -83,7 +89,8 @@ def moving_average(
     target: pd.Series, groups: pd.Series | None, horizon: int, window: int
 ) -> pd.Series:
     """Mean of the last ``window`` observed values. For a 0/1 label this is a score in [0, 1]."""
-    native_in = _native_inputs(target, groups) if window >= 1 and horizon >= 0 else None
+    use_native = _ints(horizon, window) and window >= 1 and horizon >= 0
+    native_in = _native_inputs(target, groups) if use_native else None
     if native_in is not None and _backend.native is not None:
         values, codes = native_in
         observed_n = _backend.native.lag(values, codes, int(horizon))
@@ -99,7 +106,8 @@ def ewma(
     target: pd.Series, groups: pd.Series | None, horizon: int, span: int
 ) -> pd.Series:
     """Exponentially weighted moving average over observed values."""
-    native_in = _native_inputs(target, groups) if span >= 1 and horizon >= 0 else None
+    use_native = _ints(horizon, span) and span >= 1 and horizon >= 0
+    native_in = _native_inputs(target, groups) if use_native else None
     if native_in is not None and _backend.native is not None:
         values, codes = native_in
         observed_n = _backend.native.lag(values, codes, int(horizon))
@@ -145,7 +153,8 @@ def linear_ar(
     """Causal Ridge AR(p) fit strictly on ``fit_mask`` using observed lags [h .. h+p-1]."""
     if lags < 1:
         raise ValueError("ar_lags must be >= 1")
-    native_in = _native_inputs(target, groups) if horizon >= 0 and len(fit_mask) == len(target) else None
+    use_native = _ints(horizon, lags) and horizon >= 0 and len(fit_mask) == len(target)
+    native_in = _native_inputs(target, groups) if use_native else None
     if native_in is not None and _backend.native is not None:
         try:
             preds_n = _backend.native.linear_ar(

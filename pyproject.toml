@@ -23,6 +23,11 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
     "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+# Only the pure-Python reference backend (PREDICTIVE_AUDIT_BACKEND=python) uses these.
+reference = [
     "scikit-learn>=1.4",
     "scipy>=1.11",
 ]
@@ -43,6 +48,8 @@ cases = [
 ]
 dev = [
     "hypothesis>=6.100",
+    "scikit-learn>=1.4",
+    "scipy>=1.11",
     "mypy>=1.10",
     "pandas-stubs>=2.0",
     "pytest>=8",
@@ -80,7 +87,7 @@ cache-keys = [
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-*"
 skip = "*-win32 *_i686 *-musllinux_*"
-test-requires = ["pytest>=8", "hypothesis>=6.100"]
+test-requires = ["pytest>=8", "hypothesis>=6.100", "scikit-learn>=1.4", "scipy>=1.11"]
 test-command = "pytest {project}/tests -q -p no:cacheprovider"
 test-environment = { PREDICTIVE_AUDIT_BACKEND = "native" }
 

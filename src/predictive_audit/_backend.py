@@ -13,6 +13,7 @@ parity tests can run the same inputs through both backends (see :func:`use`).
 
 from __future__ import annotations
 
+import importlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -59,6 +60,18 @@ def name() -> BackendName:
 def native_available() -> bool:
     """Whether the native extension can be imported, regardless of the active backend."""
     return _load_native() is not None
+
+
+def reference_module(name: str) -> ModuleType:
+    """Import SciPy / scikit-learn on first use. Only the pure-Python reference path needs them,
+    so importing predictive_audit (and running natively) never pays their ~0.5 s import cost."""
+    try:
+        return importlib.import_module(name)
+    except ImportError as exc:
+        raise ImportError(
+            f"the pure-Python reference backend needs {name.split('.')[0]}; install it with "
+            "`pip install 'predictive-audit[reference]'` or use the native backend"
+        ) from exc
 
 
 @contextmanager

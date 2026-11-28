@@ -13,10 +13,9 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
-from scipy import stats as sp_stats
-from sklearn import metrics as skm
 
 from . import _backend
+from ._backend import reference_module
 
 CLASSIFICATION: tuple[str, ...] = (
     "f1",
@@ -97,10 +96,11 @@ def _rank_inputs_ok(y_true: np.ndarray, *scores: np.ndarray) -> bool:
 
 
 def _native_seed(seed: Any) -> int | None:
-    try:
-        value = int(seed)
-    except (TypeError, ValueError):
+    """The seed as the engine's uint64, or None for anything NumPy's SeedSequence would treat
+    differently (floats, sequences, negative or oversized values)."""
+    if not isinstance(seed, (int, np.integer)):
         return None
+    value = int(seed)
     return value if 0 <= value < 2**64 else None
 
 
@@ -155,8 +155,10 @@ def compute(
     if name == "brier":
         return float(np.mean((yt - yp) ** 2))
     if name == "pr_auc":
+        skm = reference_module("sklearn.metrics")
         return _undefined_if_one_class(skm.average_precision_score, yt, yp)
     if name == "roc_auc":
+        skm = reference_module("sklearn.metrics")
         return _undefined_if_one_class(skm.roc_auc_score, yt, yp)
     if name == "mae":
         return float(np.mean(np.abs(yt - yp)))
@@ -460,7 +462,11 @@ def estimate_block_length(x: np.ndarray, *, max_block: int | None = None) -> int
     weights = np.where(u <= 0.5, 1.0, 2.0 * (1.0 - u))
     g_hat = 2.0 * float(np.sum(weights * lags * acov[1 : bw + 1]))
     g0_hat = float(acov[0] + 2.0 * np.sum(weights * acov[1 : bw + 1]))
-    if g0_hat <= 0.0 or g_hat == 0.0:
+    # The FFT returns exact-zero autocovariances as rounding noise (~1e-17 relative), and that
+    # noise differs between platforms (NumPy's complex multiply uses FMA on arm64). So decisions
+    # must not hinge on exact zeros: a long-run variance within 1e-10 of the variance counts as 0,
+    # and there is no special case for g_hat == 0, where b_opt already shrinks continuously to 1.
+    if g0_hat <= 1e-10 * float(acov[0]):
         return max(1, min(int(round(np.sqrt(n))), cap))
 
     d_cbb = (4.0 / 3.0) * (g0_hat ** 2)
@@ -522,7 +528,10 @@ def block_bootstrap_diff(
         native_seed = _native_seed(seed)
         yt_n, m_n, b_n = _f64(y_true), _f64(model), _f64(baseline)
         rank_ok = metric in _PREFIX_METRICS or _rank_inputs_ok(yt_n, m_n, b_n)
-        if args is not None and native_seed is not None and rank_ok:
+        ints_ok = all(
+            isinstance(v, (int, np.integer)) and not isinstance(v, (bool, np.bool_)) for v in (block, n_boot)
+        )
+        if args is not None and native_seed is not None and rank_ok and ints_ok:
             lo_n, hi_n = native.block_bootstrap_diff(
                 metric, yt_n, m_n, b_n, int(block), int(n_boot), native_seed, *args, float(threshold),
             )
@@ -728,7 +737,7 @@ def diebold_mariano(
     h_eff = min(max(1, horizon), max(1, n // 2))
     hln_factor = float(np.sqrt(max(1e-12, (n + 1.0 - 2.0 * h_eff + h_eff * (h_eff - 1.0) / n) / n)))
     stat = dm * hln_factor
-    p_val = float(2.0 * sp_stats.t.sf(abs(stat), df=n - 1))
+    p_val = float(2.0 * reference_module("scipy.stats").t.sf(abs(stat), df=n - 1))
     return stat, p_val
 
 

@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from predictive_audit import _backend, audit, baselines, metrics
+from predictive_audit import _backend, audit, baselines, batch_audit, metrics
 
 if not _backend.native_available():
     raise SystemExit("native extension not built; run `uv sync` first")
@@ -167,6 +167,35 @@ def bench_audit(runs: int) -> list[dict[str, Any]]:
     print(f"{name:<52} {py_ms:>10.2f} ms {nat_ms:>10.2f} ms {py_ms / nat_ms:>7.1f}x")
     rows.append({"workload": name, "python_ms": round(py_ms, 3), "native_ms": round(nat_ms, 3),
                  "speedup": round(py_ms / nat_ms, 1)})
+
+    def statuses(r: Any) -> list[str]:
+        return [r.verdict, *(c.status for c in r.checks)]
+
+    # Single series with a feature column (leakage check: Pearson + Spearman over 500k rows).
+    n = 500_000
+    yc, mc, _ = _classification(n, rng)
+    leaky = pd.DataFrame({
+        "t": np.arange(n), "target": np.roll(yc, -1), "pred": mc, "f1": rng.normal(size=n),
+        "split": np.where(np.arange(n) < int(0.8 * n), "train", "test"),
+    }).iloc[:-1]
+    extra = [
+        ("audit() F1 + feature leakage, 500,000 rows",
+         lambda: statuses(audit(leaky, "target", task="classification", pred="pred", time="t", split="split",
+                                metric="f1", features="f1", n_boot=500, seed=0))),
+        ("batch_audit() 785 series x 1,000, every baseline",
+         lambda: [r["status"] for r in batch_audit(panel, "y", group_col="od", task="regression", pred="pred",
+                                                    time="t", split="split", season="auto", include_ewma=True,
+                                                    ar_lags=5, n_boot=200, seed=0).rows]),
+    ]
+    for name, fn in extra:
+        with _backend.use("python"):
+            py_ms, py_res = _timed(fn, max(1, min(runs, 3)))
+        with _backend.use("native"):
+            nat_ms, nat_res = _timed(fn, max(1, min(runs, 3)))
+        assert py_res == nat_res, name
+        print(f"{name:<52} {py_ms:>10.2f} ms {nat_ms:>10.2f} ms {py_ms / nat_ms:>7.1f}x")
+        rows.append({"workload": name, "python_ms": round(py_ms, 3), "native_ms": round(nat_ms, 3),
+                     "speedup": round(py_ms / nat_ms, 1)})
     return rows
 
 

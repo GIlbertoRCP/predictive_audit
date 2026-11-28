@@ -41,6 +41,7 @@ FetchContent_MakeAvailable(pocketfft)
 
 # --- core library -------------------------------------------------------------
 add_library(paudit STATIC
+  src/audit.cpp
   src/baselines.cpp
   src/bootstrap.cpp
   src/fft.cpp
@@ -108,6 +109,7 @@ if(PAUDIT_BUILD_TESTS)
 
   enable_testing()
   add_executable(paudit_tests
+    tests/test_audit.cpp
     tests/test_baselines.cpp
     tests/test_bootstrap.cpp
     tests/test_inference.cpp
