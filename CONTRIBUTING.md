@@ -38,7 +38,7 @@ results that come from LAPACK/BLAS (Ridge AR solves, dot products), and pandas' 
 arm64 build fuses multiply-adds. Parity tests scale their tolerance to the problem in those cases.
 
 The CLI has two more kinds of parity checks:
-- **The CSV reader** (`tests/test_native_csv.py`) must give exactly the `pandas.read_csv` columns, floats bit for bit, on generated files. pandas' float parser changed in 3.1, so the reader follows the installed pandas.
+- **The CSV reader** (`tests/test_native_csv.py`) must give exactly the `pandas.read_csv` columns, floats bit for bit, on generated files. pandas' float parser differs between 2.x, 3.0 and 3.1, so the reader follows the installed pandas.
 - **The CLI** (`tests/test_native_cli.py`, `tests/golden/`) must match the Python CLI's exit codes and stderr exactly, and its text/Markdown output byte for byte. The exception is a BLAS-computed number that sits exactly on a rounding boundary: it may print one unit apart. JSON must match up to the BLAS-bound digits. The golden files are exact.
 
 When a pandas behaviour is a bug rather than a rule (bare-CR line endings, for example), the reader raises `Unsupported` so pandas handles that input; it does not copy the bug.

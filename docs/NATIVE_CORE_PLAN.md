@@ -38,7 +38,7 @@ Record every one of these before and after in `BENCHMARKS.md`. They are the head
 | FFT | **pocketfft** (header-only C++) | It is NumPy's own FFT backend, so autocovariances match to ~1e-15. |
 | Linear algebra | Hand-rolled Cholesky for the (p+1)×(p+1) Ridge system, QR fallback | Systems are ≤ ~20×20; no need for Eigen. Add Eigen later only if needed. |
 | Student-t tail (DM p-value) | In-house regularized incomplete beta (Lentz continued fraction, Stirling-differenced log-beta for large df) | Matches `scipy.stats.t.sf` to < 2e-9 relative over df 1–5e7 without a large Boost download. |
-| CSV/TSV parsing | In-house tokenizer + per-column parallel conversion; pandas' own float converters (a port of `precise_xstrtod` for pandas ≤ 3.0, **fast_float** for ≥ 3.1) | Results must equal `pd.read_csv` bit for bit, so a correctly rounded parser alone is not enough. |
+| CSV/TSV parsing | In-house tokenizer + per-column parallel conversion; pandas' own float converters (ports of `precise_xstrtod` for pandas 2.x and 3.0, **fast_float** for ≥ 3.1) | Results must equal `pd.read_csv` bit for bit, so a correctly rounded parser alone is not enough. |
 | Parquet / Feather | Optional `PAUDIT_WITH_ARROW=ON` build flag | Arrow is heavy; ship it in the wheel path (pyarrow) first, native later. |
 | CLI args / config | Hand-written argparse-compatible parser + **toml++** | Matches argparse (prefix abbreviations, negative-number values, messages) and the TOML-defaults behaviour exactly. |
 | JSON | Hand-written strict RFC 8259 writer | Small surface; must reproduce `json.dumps(indent=2)` layout and NaN→`null`. |
@@ -153,11 +153,14 @@ Port `metrics.py` behind the same Python signatures:
 - [x] The CSV/TSV reader (`native/src/csv.cpp`) gives the same columns as `pd.read_csv` with default options:
   - **Column types:** int64, float64, bool or string, with pandas' inference order; ints with missing values become float64.
   - **Header and text:** pandas' 19 default NA strings; quoted fields with doubled quotes; BOM; CRLF; blank and whitespace-only lines skipped; `Unnamed: i` and `.1`/`.2` header names; pandas' `ParserError`/`EmptyDataError` messages, including its line numbering.
-  - **Floats are bit-identical, which meant porting pandas' converter.** pandas' default float parser is not correctly rounded, and two findings shaped the port:
-    - pandas **≤ 3.0** (`precise_xstrtod`) keeps 17 digits in a double. Its **macOS arm64 wheels are compiled with FMA contraction** and its Linux and Windows wheels are not, so the last bit differs between platforms for ~6% of 17-digit inputs. Checked against pandas 2.3.3 and 3.0.6 on macOS arm64, Linux arm64 and x86-64.
+  - **Floats are bit-identical, which meant porting pandas' converter.** pandas' default float parser is not correctly rounded, and it differs across three pandas generations:
+    - pandas **3.0** (`precise_xstrtod`) keeps 17 digits in a double. Its **macOS arm64 wheels are compiled with FMA contraction** and its Linux and Windows wheels are not, so the last bit differs between platforms for ~6% of 17-digit inputs. Checked on macOS arm64, Linux arm64 and x86-64.
+    - pandas **2.x** uses the same digit loop, but an exponent above 308 or an overflow to ±inf is an error, so the field stays text. It also allows no whitespace after the `e`. Two inputs are left to pandas:
+      - an integer part beyond int64, because its integer pre-check ignores a trailing `.5`;
+      - exponents of more than 9 digits, because they accumulate in a 32-bit int that wraps (`1e2147483648` segfaults pandas 2.3.3).
     - pandas **3.1** switched to fast_float, plus a rewritten fallback for tokens fast_float declines (a `+` sign with surrounding whitespace, …).
 
-    The reader implements both and follows the installed pandas. The standalone binary follows pandas ≥ 3.1.
+    The reader implements all three and follows the installed pandas (checked against 2.3.3, 3.0.6 and 3.1.1). The standalone binary follows pandas ≥ 3.1.
   - **Left to pandas (`Unsupported`):** integers beyond int64, a first row longer than the header (pandas turns it into an index), invalid UTF-8, and bare-CR line endings, where pandas' tokenizer has bugs (repeated fields after a CR followed by whitespace, a dropped leading field after a blank line).
 - [x] Time columns: numeric if the column parses as numbers, otherwise sorted as text, as today.
 - [x] Renderers (`native/src/report.cpp`): text and Markdown byte-identical to `report.py`. JSON follows `json.dumps(indent=2)`: same key order, ASCII escapes with surrogate pairs, NaN/Inf → `null`, and Python `repr` floats. `std::to_chars` needs macOS 13.3+, so floats use shortest round-trip via `snprintf`/`strtod`, with the power-of-two neighbour case handled. That matches `repr` on 2M random doubles and every power of two.

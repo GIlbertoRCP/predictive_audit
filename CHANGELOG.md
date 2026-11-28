@@ -26,7 +26,7 @@ All notable changes to **predictive-audit** are documented here.
   - The `predictive-audit` executable runs a full audit with no Python on the machine. It has the same flags, TOML config handling, `--wide` mode, reports and 0/1/2 exit codes, plus `--threads N` and `--version`.
   - Startup takes 4.7 ms (the Python CLI: 246 ms), and a 10,000-row audit takes 7 ms (744 ms).
   - The package's console script runs the same C++ code. Only inputs that need pandas (Parquet, Feather, compressed files, missing values in key columns, …) go through the Python implementation.
-  - Its CSV/TSV reader returns the same columns as `pandas.read_csv`, floats bit for bit. It follows the installed pandas, whose float parser changed in 3.1 and, before 3.1, rounds differently on macOS arm64.
+  - Its CSV/TSV reader returns the same columns as `pandas.read_csv`, floats bit for bit. It follows the installed pandas: its float parser differs between pandas 2.x, 3.0 and 3.1, and before 3.1 it also rounds differently on macOS arm64.
   - Golden output tests in `tests/golden/` also run against the standalone binary in CI.
 - `tests/test_native_parity.py`, `tests/test_native_parity_baselines.py`, `tests/test_native_parity_audit.py`, `tests/test_native_csv.py` and `tests/test_native_cli.py` (hypothesis-driven native-vs-reference checks), `benchmarks/bench_native.py`, ThreadSanitizer CI job.
 
