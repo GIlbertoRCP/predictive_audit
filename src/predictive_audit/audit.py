@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
-from scipy import stats as sp_stats
 
-from . import baselines, metrics
+from . import _backend, baselines, metrics
+from ._backend import reference_module
 
 SCHEMA_VERSION = "1.0"
 SEVERITY: dict[str, int] = {"INFO": 0, "PASS": 1, "WARN": 2, "FAIL": 3}
@@ -152,6 +152,19 @@ def audit(
     allowed = metrics.CLASSIFICATION if task == "classification" else metrics.REGRESSION
     if metric not in allowed:
         raise ValueError(f"metric {metric!r} is not valid for {task}; choose from {allowed}")
+
+    prepared = _native_prepare(
+        df, target, task=task, horizon=horizon, pred=pred, model_name=model_name, group_cols=group_cols,
+        time=time, split=split, feature_cols=feature_cols, season=season, window=window,
+        include_ewma=include_ewma, ar_lags=ar_lags, metric=metric, reported=reported, threshold=threshold,
+        n_boot=n_boot, block=block, seed=seed, extra_baselines=extra_baselines,
+        want_eval_arrays=bool(extra_checks),
+    )
+    if prepared is not None and _backend.native is not None:
+        return _report_from_native(
+            _backend.native.audit(*prepared), df, extra_checks, metric,
+            horizon=horizon, model_name=model_name, pred=pred, reported=reported,
+        )
 
     sort_cols = group_cols + ([time] if time else [])
     data = df.sort_values(sort_cols, kind="stable") if sort_cols else df
@@ -317,9 +330,7 @@ def batch_audit(
     metric_name = ""
     model_name: str | None = None
 
-    for grp, gdf in df.groupby(group_col, sort=False):
-        key = str(grp)
-        rep = audit(gdf, target, **kwargs)
+    for key, rep in _batch_reports(df, target, group_col, kwargs):
         reports[key] = rep
         metric_name = rep.metric
         model_name = rep.model
@@ -359,6 +370,286 @@ def batch_audit(
         model=model_name,
         reports=reports,
         rows=rows,
+    )
+
+
+def _batch_reports(
+    df: pd.DataFrame, target: str, group_col: str, kwargs: dict[str, Any]
+) -> Iterator[tuple[str, AuditReport]]:
+    """(str(group), report) per series, in groupby(sort=False) order: natively in parallel when
+    possible, otherwise one Python audit() call per group."""
+    native = _backend.native
+    hooks = kwargs.get("extra_baselines") or kwargs.get("extra_checks")
+    # Categorical group columns stay on groupby, whose handling of unused categories changed
+    # between pandas 2 and 3 (``observed=``).
+    categorical = isinstance(df[group_col].dtype, pd.CategoricalDtype)
+    if native is not None and not hooks and not categorical and set(kwargs) <= _AUDIT_KWARGS:
+        codes, uniques = pd.factorize(df[group_col], sort=False)
+        if len(uniques) > 0:
+            task = kwargs.get("task", "classification")
+            horizon = kwargs.get("horizon", 1)
+            if task not in ("classification", "regression"):
+                raise ValueError("task must be 'classification' or 'regression'")
+            if horizon < 1:
+                raise ValueError("horizon must be >= 1")
+            feature_cols = _as_list(kwargs.get("features"))
+            pred, time, split = kwargs.get("pred"), kwargs.get("time"), kwargs.get("split")
+            _require_columns(df, [target, pred, time, split, *feature_cols])
+            metric = kwargs.get("metric") or ("f1" if task == "classification" else "mae")
+            allowed = metrics.CLASSIFICATION if task == "classification" else metrics.REGRESSION
+            if metric not in allowed:
+                raise ValueError(f"metric {metric!r} is not valid for {task}; choose from {allowed}")
+            prepared = _native_prepare(
+                df, target, task=task, horizon=horizon, pred=pred, model_name=kwargs.get("model_name"),
+                group_cols=[], time=time, split=split, feature_cols=feature_cols,
+                season=kwargs.get("season"), window=kwargs.get("window"),
+                include_ewma=kwargs.get("include_ewma", False), ar_lags=kwargs.get("ar_lags"), metric=metric,
+                reported=kwargs.get("reported"), threshold=kwargs.get("threshold", 0.5),
+                n_boot=kwargs.get("n_boot", 500), block=kwargs.get("block"), seed=kwargs.get("seed", 0),
+                extra_baselines=None, want_eval_arrays=False,
+            )
+            if prepared is not None:
+                raws = native.audit_each_series(
+                    *prepared, np.ascontiguousarray(codes, dtype=np.int64), len(uniques)
+                )
+                for k, raw in enumerate(raws):
+                    yield str(uniques[k]), _report_from_native(
+                        raw, df, None, metric, horizon=horizon, model_name=kwargs.get("model_name"),
+                        pred=pred, reported=kwargs.get("reported"),
+                    )
+                return
+    for grp, gdf in df.groupby(group_col, sort=False):
+        yield str(grp), audit(gdf, target, **kwargs)
+
+
+# --- native dispatch -------------------------------------------------------------
+
+
+_AUDIT_KWARGS = {
+    "task", "horizon", "pred", "model_name", "groups", "time", "split", "features", "season", "window",
+    "include_ewma", "ar_lags", "metric", "reported", "threshold", "n_boot", "block", "seed",
+    "extra_baselines", "extra_checks",
+}
+
+
+def _key_column(col: pd.Series) -> np.ndarray | None:
+    """Order- and equality-preserving int64/float64 sort key for a column, or None to stay in pandas.
+
+    Integers and floats pass through; datetimes become their int64 ticks; anything else
+    (strings, categoricals, objects) becomes ``pd.factorize(sort=True)`` codes. Missing values
+    (NaN/NaT/None/pd.NA) keep the pandas path, where they have special sort and grouping rules.
+    """
+    dtype = col.dtype
+    if isinstance(dtype, np.dtype) and dtype.kind in "iub":
+        if dtype.kind == "u" and len(col) and int(col.max()) > np.iinfo(np.int64).max:
+            return None
+        return np.ascontiguousarray(col.to_numpy(dtype=np.int64))
+    if isinstance(dtype, np.dtype) and dtype.kind == "f":
+        values = np.ascontiguousarray(col.to_numpy(dtype=np.float64))
+        return None if np.isnan(values).any() else values
+    if isinstance(dtype, np.dtype) and dtype.kind in "mM":
+        values = col.to_numpy()
+        return None if np.isnat(values).any() else np.ascontiguousarray(values.view(np.int64))
+    if col.isna().any():
+        return None
+    try:
+        codes, _ = pd.factorize(col, sort=True)
+    except TypeError:
+        return None
+    return np.ascontiguousarray(codes, dtype=np.int64)
+
+
+def _split_kinds(col: pd.Series) -> np.ndarray:
+    """0 = other, 1 = train, 2 = test per row, matching ``col.astype(str).str.lower()``."""
+    codes, uniques = pd.factorize(col)
+    labels = [str(u).lower() for u in uniques]
+    kinds = [2 if lab == "test" else 1 if lab == "train" else 0 for lab in labels]
+    kind_of = np.array([*kinds, 0], dtype=np.uint8)
+    return np.ascontiguousarray(kind_of[codes])  # code -1 (missing) indexes the trailing 0
+
+
+def _native_prepare(
+    df: pd.DataFrame,
+    target: str,
+    *,
+    task: str,
+    horizon: int,
+    pred: str | None,
+    model_name: str | None,
+    group_cols: list[str],
+    time: str | None,
+    split: str | None,
+    feature_cols: list[str],
+    season: int | str | None,
+    window: int | None,
+    include_ewma: bool,
+    ar_lags: int | None,
+    metric: str,
+    reported: float | None,
+    threshold: float | str,
+    n_boot: int,
+    block: int | str | None,
+    seed: int,
+    extra_baselines: dict[str, pd.Series] | None,
+    want_eval_arrays: bool,
+) -> tuple[Any, dict[str, Any]] | None:
+    """Inputs and config for the native pipeline, or None to run the pandas reference path."""
+    native = _backend.native
+    if native is None:
+        return None
+    # Reports carry the caller's own labels (table keys, detail keys, column names). The native
+    # engine speaks strings, so non-string labels keep the pandas path.
+    labels = [target, *feature_cols, *(extra_baselines or {})]
+    if pred:
+        labels += [pred, model_name or pred]
+    if not all(isinstance(label, str) for label in labels):
+        return None
+    # Arguments the engine would read differently from pandas/NumPy keep the reference path, which
+    # then uses or rejects them as before: bools (``True`` is an int, but pandas rejects
+    # ``window=True`` and the reports would show ``m=True``), floats where ints are expected, and
+    # non-numeric scores.
+    native_seed = metrics._native_seed(seed)
+    if native_seed is None or not _is_int(n_boot) or not _is_int(horizon):
+        return None
+    if window is not None and (not _is_int(window) or window < 0):
+        return None
+    if ar_lags is not None and not _is_int(ar_lags):
+        return None
+    if reported is not None and not _is_real(reported):
+        return None
+    threshold_value = 0.5
+    if task == "classification" and threshold != "auto":
+        try:
+            threshold_value = float(threshold)
+        except (TypeError, ValueError):
+            return None
+    season_mode, season_value, season_error = "none", 0, None
+    if season == "auto":
+        season_mode = "auto"
+    elif isinstance(season, bool):
+        return None
+    elif isinstance(season, int):
+        if season < 0:
+            return None
+        season_mode, season_value = "fixed", int(season)
+    elif season is not None:
+        season_error = f"season must be an int, 'auto', or None; got {season!r}"
+    if block == "auto":
+        block_mode, block_value = "auto", 0
+    elif block is None:
+        block_mode, block_value = "default", 0
+    else:
+        try:
+            block_mode, block_value = "fixed", int(block)
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        keys = [_key_column(df[c]) for c in group_cols]
+        time_key = _key_column(df[time]) if time else None
+        if any(k is None for k in keys) or (time and time_key is None):
+            return None
+        inputs = native.AuditInputs()
+        inputs.target = np.ascontiguousarray(df[target].astype(float).to_numpy(), dtype=np.float64)
+        pred_values = None
+        if pred:
+            pred_values = np.ascontiguousarray(df[pred].astype(float).to_numpy(), dtype=np.float64)
+            inputs.pred = pred_values
+        inputs.group_keys = keys
+        if time_key is not None:
+            if time_key.dtype == np.float64:
+                inputs.time_f64 = time_key
+            else:
+                inputs.time_i64 = time_key
+        if split:
+            inputs.split = _split_kinds(df[split])
+        inputs.feature_names = list(feature_cols)
+        inputs.features = [
+            np.ascontiguousarray(df[f].astype(float).to_numpy(), dtype=np.float64) for f in feature_cols
+        ]
+        extras = extra_baselines or {}
+        inputs.extra_names = [str(k) for k in extras]
+        inputs.extras = [
+            np.ascontiguousarray(v.reindex(df.index).astype(float).to_numpy(), dtype=np.float64)
+            for v in extras.values()
+        ]
+    except (TypeError, ValueError, KeyError):
+        return None  # let the pandas path raise its own error, in its own order
+    if task == "classification":
+        # scikit-learn rejects infinite scores with its own message; keep that behaviour.
+        scored = [a for a in (pred_values, *inputs.extras) if a is not None]
+        if any(np.isinf(a).any() for a in scored):
+            return None
+
+    config: dict[str, Any] = {
+        "task": task,
+        "horizon": int(horizon),
+        "target_name": str(target),
+        "model_name": (model_name or pred) if pred else None,
+        "split_name": str(split) if split else "",
+        "metric": metric,
+        "season_mode": season_mode,
+        "season": season_value,
+        "season_error": season_error,
+        "window": None if window is None else int(window),
+        "include_ewma": bool(include_ewma),
+        "ar_lags": None if ar_lags is None else int(ar_lags),
+        "reported": None if reported is None else float(reported),
+        "threshold_auto": task == "classification" and threshold == "auto",
+        "threshold": threshold_value,
+        "n_boot": int(n_boot),
+        "block_mode": block_mode,
+        "block": block_value,
+        "seed": native_seed,
+        "ewm_com1_update": baselines._PANDAS_EWM_COM1_UPDATE,
+        "want_eval_arrays": want_eval_arrays,
+    }
+    return inputs, config
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_))
+
+
+def _is_real(value: Any) -> bool:
+    numeric = isinstance(value, (int, float, np.integer, np.floating))
+    return numeric and not isinstance(value, (bool, np.bool_))
+
+
+def _report_from_native(
+    raw: dict[str, Any],
+    df: pd.DataFrame,
+    extra_checks: Sequence[CheckFn] | None,
+    metric: str,
+    *,
+    horizon: int,
+    model_name: str | None,
+    pred: str | None,
+    reported: float | None,
+) -> AuditReport:
+    checks = [Check(name, status, summary, details) for name, status, summary, details in raw["checks"]]
+    for check in checks:
+        if check.name == "reported score":
+            check.details["reported"] = reported  # the caller's object, e.g. an int stays an int
+    if extra_checks:
+        rows = raw["eval_rows"]
+        p_eval = dict(zip(raw["table"], raw["eval_predictions"], strict=True))
+        for fn in extra_checks:
+            checks.append(fn(df.iloc[rows], p_eval, raw["eval_target"]))
+    return AuditReport(
+        task=raw["task"],
+        target=raw["target"],
+        horizon=horizon,  # the caller's objects, as the Python path stores them
+        metric=metric,
+        model=(model_name or pred) if pred else model_name,
+        season=raw["season"],
+        n_eval=raw["n_eval"],
+        prevalence=raw["prevalence"],
+        best_baseline=raw["best_baseline"],
+        table=raw["table"],
+        checks=checks,
+        threshold=raw["threshold"],
+        mase=raw["mase"],
     )
 
 
@@ -778,7 +1069,7 @@ def _spearman(a: np.ndarray, b: np.ndarray) -> float:
     a, b = a[ok], b[ok]
     if len(a) < 5 or a.std() == 0 or b.std() == 0:
         return float("nan")
-    res = sp_stats.spearmanr(a, b)
+    res = reference_module("scipy.stats").spearmanr(a, b)
     return float(res.statistic)
 
 

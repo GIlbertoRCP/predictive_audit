@@ -110,6 +110,24 @@ Same harness, at Case 03 scale (785 series × 1,000 steps) unless noted. Rows ma
 - ROC-AUC on its own is dominated by the sort, which NumPy already does well.
 - **Single-series audits on large inputs are still pandas-bound** (sorting, group keys, leakage checks): Phase 3.
 
+### Phase 3: the whole `audit()` pipeline
+
+`audit()` and `batch_audit()` now run end to end in C++. Python keeps only column extraction: dtype checks, `factorize` for string keys, and split labels. Verdicts and statuses were asserted identical before timing.
+
+| Workload | Python reference | Native | Speedup |
+|---|---:|---:|---:|
+| `audit()` MAE · 10k rows | 2.76 ms | **0.80 ms** | **3.4×** |
+| `audit()` F1 · 10k rows | 7.91 ms | **0.95 ms** | **8.3×** |
+| `audit()` MAE · 500k rows | 73.84 ms | **30.02 ms** | **2.5×** |
+| `audit()` F1 · 500k rows | 129.01 ms | **41.83 ms** | **3.1×** |
+| `audit()` F1 + feature leakage · 500k rows | 280.55 ms | **80.18 ms** | **3.5×** |
+| `audit()` every baseline · 785 × 1,000 panel | 3,263.92 ms | **120.72 ms** | **27.0×** |
+| `batch_audit()` 785 series · every baseline | 1,603.09 ms | **47.03 ms** | **34.1×** |
+| `import predictive_audit` (warm) | 0.70 s | **0.18 s** | **3.9×** |
+
+- `batch_audit` gains the most: 785 independent audits run in parallel instead of a Python loop.
+- The import-time drop comes from not loading SciPy and scikit-learn; only the reference path needs them. For a CLI gate, startup is now dominated by pandas. The standalone binary (Phase 4) removes Python startup entirely.
+
 ---
 
 ## Reproducing Benchmarks

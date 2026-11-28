@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -21,6 +22,14 @@ struct DmResult {
                                        std::span<const double> model, std::span<const double> baseline,
                                        std::int64_t horizon = 1, GroupCodes groups = std::nullopt,
                                        const TimeKeys& times = {}, double threshold = 0.5);
+
+/// d_t = L(y_t, baseline_t) - L(y_t, model_t) (positive favors the model) for metrics with a
+/// per-step loss (mae, rmse, brier, smape, accuracy); nullopt otherwise.
+[[nodiscard]] std::optional<std::vector<double>> step_loss_differential(Metric metric,
+                                                                        std::span<const double> y_true,
+                                                                        std::span<const double> model,
+                                                                        std::span<const double> baseline,
+                                                                        double threshold = 0.5);
 
 /// Benjamini-Hochberg FDR q-values; NaN inputs stay NaN.
 [[nodiscard]] std::vector<double> benjamini_hochberg(std::span<const double> p_values);

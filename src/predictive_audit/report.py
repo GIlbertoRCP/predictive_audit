@@ -19,7 +19,7 @@ def _rows(report: AuditReport) -> tuple[list[str], list[list[str]]]:
     names = list(next(iter(report.table.values())).keys())
     rows: list[list[str]] = []
     for model, values in report.table.items():
-        label = model
+        label = str(model)
         if model == report.model:
             label += "  <- model"
         elif model == report.best_baseline:

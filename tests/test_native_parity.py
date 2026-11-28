@@ -128,6 +128,17 @@ def test_block_lengths_are_identical(n: int, seed: int, phi: float) -> None:
 
 
 @settings(max_examples=40, deadline=None)
+@given(n=st.integers(20, 400), seed=st.integers(0, 2**32), k=st.integers(1, 6))
+def test_block_length_of_sparse_series_is_identical(n: int, seed: int, k: int) -> None:
+    # A loss differential that is mostly 0 (e.g. two classifiers that usually agree): its true
+    # autocovariances are exactly 0, and the FFT returns platform-dependent rounding noise.
+    rng = np.random.default_rng(seed)
+    x = np.zeros(n)
+    x[rng.choice(n, size=min(k, n), replace=False)] = rng.choice([-1.0, 1.0], size=min(k, n))
+    assert _same(*_both(metrics.estimate_block_length, x))
+
+
+@settings(max_examples=40, deadline=None)
 @given(
     metric=st.sampled_from(PREFIX_METRICS),
     n=st.integers(3, 1200),

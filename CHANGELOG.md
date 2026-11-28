@@ -17,11 +17,21 @@ All notable changes to **predictive-audit** are documented here.
   - **Rank metrics:** scikit-learn-exact ROC-AUC and average precision (bit-identical), and an O(n log n) optimal-threshold search.
   - **Rank-metric bootstrap:** sorts once, then runs a weighted O(n) sweep per draw, bit-identical to calling scikit-learn on each resample.
   - **Result:** a 785-series audit with every baseline runs 17× faster (3.6 s → 0.21 s); the Ridge AR baseline is 71× faster and the ROC/PR bootstraps 130–170× faster.
-- `tests/test_native_parity.py` and `tests/test_native_parity_baselines.py` (hypothesis-driven native-vs-reference checks), `benchmarks/bench_native.py`, ThreadSanitizer CI job.
+- **Native Phase 3 pipeline:**
+  - `audit()` and `batch_audit()` run end to end in C++: sort, group, baselines, metric table, and all six checks with the same summary text.
+  - Results: single-series audits are 2.5–8.3× faster, a 785-series panel audit 27×, and `batch_audit` over 785 series 34× (series in parallel).
+  - Verdicts, statuses, report text and numbers match the reference except the documented LAPACK/BLAS-bound cases.
+  - `extra_baselines` and `extra_checks` keep working unchanged.
+- `tests/test_native_parity.py`, `tests/test_native_parity_baselines.py` and `tests/test_native_parity_audit.py` (hypothesis-driven native-vs-reference checks), `benchmarks/bench_native.py`, ThreadSanitizer CI job.
 
 ### Changed
+- **SciPy and scikit-learn are no longer runtime dependencies.** Only the pure-Python reference backend (`PREDICTIVE_AUDIT_BACKEND=python`) uses them; install them with `pip install 'predictive-audit[reference]'`. They are imported on first use, so `import predictive_audit` drops from 0.70 s to 0.18 s.
 - Build backend switched from setuptools to **scikit-build-core** + nanobind (C++20 compiler and CMake ≥ 3.24 needed for source builds).
 - Release workflow builds platform wheels with **cibuildwheel** (Linux x86_64/aarch64, macOS arm64/x86_64, Windows x64; CPython 3.10–3.13) and tests each wheel.
+
+### Fixed
+- `report.to_text()` / `to_markdown()` crashed when the prediction column label was not a string.
+- `block="auto"` (Politis–White) no longer depends on floating-point noise when the loss differential is mostly zero, e.g. a classifier that usually agrees with its baseline. Autocovariances that are exactly zero come back from the FFT as ~1e-19 noise that differs by platform (NumPy's complex multiply is fused on arm64). An exact-zero test then picked √n or 1 depending on that noise. The estimate now shrinks smoothly to 1 as serial correlation vanishes, and a long-run variance within 1e-10 of the variance counts as zero.
 
 ## [0.2.0] - 2026-11-24
 

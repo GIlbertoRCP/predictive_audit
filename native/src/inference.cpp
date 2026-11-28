@@ -114,6 +114,17 @@ double lagged_dot(const std::vector<double>& x, std::size_t lag) noexcept {
 
 }  // namespace
 
+std::optional<std::vector<double>> step_loss_differential(Metric metric, std::span<const double> y_true,
+                                                          std::span<const double> model,
+                                                          std::span<const double> baseline,
+                                                          double threshold) {
+  if (!step_loss(metric, 0.0, 0.0, 0.0, threshold)) return std::nullopt;
+  std::vector<double> d(y_true.size());
+  for (std::size_t i = 0; i < d.size(); ++i)
+    d[i] = *step_loss(metric, y_true[i], model[i], baseline[i], threshold);
+  return d;
+}
+
 double incomplete_beta(double a, double b, double x, double y) {
   if (!(a > 0.0) || !(b > 0.0)) throw std::invalid_argument("incomplete_beta: a and b must be positive");
   if (std::isnan(x) || std::isnan(y)) return kNaN;
