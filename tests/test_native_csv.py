@@ -19,7 +19,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from predictive_audit import _backend
-from predictive_audit.cli import _PANDAS_31
+from predictive_audit.cli import _PANDAS_VERSION
 
 NATIVE = _backend._load_native()  # the extension itself, whichever backend is active
 pytestmark = pytest.mark.skipif(NATIVE is None, reason="native extension not built")
@@ -122,7 +122,7 @@ def _pandas(path: str, sep: str) -> Any:
 
 def _native(text: str, sep: str) -> Any:
     try:
-        return NATIVE.read_csv(text, sep, _PANDAS_31)
+        return NATIVE.read_csv(text, sep, _PANDAS_VERSION)
     except ValueError as exc:
         return ("error", str(exc))
 

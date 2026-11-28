@@ -153,13 +153,14 @@ def _compare_reports(native: Any, python: Any, kwargs: dict[str, Any]) -> None:
         assert native == python
         return
     dn, dp = native.to_dict(), python.to_dict()
-    assert dn["verdict"] == dp["verdict"]
-    assert [c["status"] for c in dn["checks"]] == [c["status"] for c in dp["checks"]]
     lapack_ties = kwargs.get("task") == "classification" and bool(kwargs.get("ar_lags"))
     if lapack_ties and "linear AR" in dp["best_baseline"]:
-        # The checks are computed against a BLAS-dependent best baseline: compare structure only.
+        # The checks (and so their statuses and the verdict) are computed against a BLAS-dependent
+        # best baseline: compare structure only.
         _assert_same(dn["table"], dp["table"], "/table", lapack_ties=True)
         return
+    assert dn["verdict"] == dp["verdict"]
+    assert [c["status"] for c in dn["checks"]] == [c["status"] for c in dp["checks"]]
     _assert_same(dn, dp, lapack_ties=lapack_ties)
     if not lapack_ties:
         assert same_text(report.to_text(native), report.to_text(python))
@@ -187,9 +188,9 @@ def test_batch_audit_matches(seed: int) -> None:
     assert list(native.reports) == list(python.reports)
     for key in python.reports:
         _compare_reports(native.reports[key], python.reports[key], kwargs)
-    assert [r["status"] for r in native.rows] == [r["status"] for r in python.rows]
-    assert native.tally == python.tally
-    if not (kwargs["task"] == "classification" and kwargs["ar_lags"]):
+    if not (kwargs["task"] == "classification" and kwargs["ar_lags"]):  # see _compare_reports
+        assert [r["status"] for r in native.rows] == [r["status"] for r in python.rows]
+        assert native.tally == python.tally
         _assert_same(native.to_dict(), python.to_dict())
 
 

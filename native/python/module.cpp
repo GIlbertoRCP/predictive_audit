@@ -454,11 +454,11 @@ NB_MODULE(_native, m) {
   // --- command line --------------------------------------------------------------------------------
   m.def(
       "cli_main",
-      [](const std::vector<std::string>& args, bool ewm_com1_update, bool pandas_31) {
+      [](const std::vector<std::string>& args, bool ewm_com1_update, std::pair<int, int> pandas_version) {
         paudit::cli::Options options;
         options.allow_fallback = true;
         options.ewm_com1_update = ewm_com1_update;
-        options.pandas = pandas_31 ? paudit::io::Pandas::v31 : paudit::io::Pandas::v2_v30;
+        options.pandas = paudit::io::pandas_for_version(pandas_version.first, pandas_version.second);
         paudit::cli::Result r;
         {
           const nb::gil_scoped_release release;
@@ -466,19 +466,19 @@ NB_MODULE(_native, m) {
         }
         return std::make_tuple(r.exit_code, r.out, r.err, r.fallback, r.fallback_reason);
       },
-      "args"_a, "ewm_com1_update"_a, "pandas_31"_a,
+      "args"_a, "ewm_com1_update"_a, "pandas_version"_a,
       "Run the predictive-audit CLI natively: (exit code, stdout, stderr, fallback, reason). "
       "fallback=True means the input needs the pandas implementation; nothing was written.");
 
   // --- test support -------------------------------------------------------------------------------
   m.def(
       "read_csv",
-      [](const std::string& text, char sep, bool pandas_31) {
+      [](const std::string& text, char sep, std::pair<int, int> pandas_version) {
         paudit::io::Table t;
         try {
           const nb::gil_scoped_release release;
-          t = paudit::io::read_csv(text, sep,
-                                   pandas_31 ? paudit::io::Pandas::v31 : paudit::io::Pandas::v2_v30);
+          t = paudit::io::read_csv(
+              text, sep, paudit::io::pandas_for_version(pandas_version.first, pandas_version.second));
         } catch (const paudit::io::ParseError& e) {
           throw nb::value_error(e.what());
         } catch (const paudit::io::Unsupported& e) {
@@ -520,7 +520,7 @@ NB_MODULE(_native, m) {
         }
         return cols;
       },
-      "text"_a, "sep"_a, "pandas_31"_a,
+      "text"_a, "sep"_a, "pandas_version"_a,
       "Parse CSV text like pandas.read_csv: [(name, kind, values)]. Raises ValueError for pandas "
       "errors and NotImplementedError for inputs the native reader leaves to pandas.");
   m.def(

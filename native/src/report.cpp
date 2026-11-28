@@ -80,7 +80,7 @@ struct Json {
   std::int64_t integer = 0;
   std::string str;
   std::vector<Json> items;
-  std::vector<std::pair<std::string, Json>> fields;
+  std::vector<std::string> keys;  ///< object keys, parallel to `items` (a pair would need Json complete)
 
   static Json number(double v) {
     Json j;
@@ -111,7 +111,8 @@ struct Json {
     return j;
   }
   Json& add(std::string key, Json value) {
-    fields.emplace_back(std::move(key), std::move(value));
+    keys.push_back(std::move(key));
+    items.push_back(std::move(value));
     return *this;
   }
 };
@@ -213,17 +214,17 @@ void dump(std::string& out, const Json& j, std::size_t depth) {
       out += ']';
       return;
     case Json::Type::object:
-      if (j.fields.empty()) {
+      if (j.keys.empty()) {
         out += "{}";
         return;
       }
       out += "{\n";
-      for (std::size_t i = 0; i < j.fields.size(); ++i) {
+      for (std::size_t i = 0; i < j.keys.size(); ++i) {
         indent(depth + 1);
-        write_string(out, j.fields[i].first);
+        write_string(out, j.keys[i]);
         out += ": ";
-        dump(out, j.fields[i].second, depth + 1);
-        out += i + 1 < j.fields.size() ? ",\n" : "\n";
+        dump(out, j.items[i], depth + 1);
+        out += i + 1 < j.keys.size() ? ",\n" : "\n";
       }
       indent(depth);
       out += '}';

@@ -94,7 +94,9 @@ const std::array<double, 309>& powers_of_ten() {
 // Port of pandas' precise_xstrtod (pandas <= 3.0, pandas/_libs/src/parser/tokenizer.c,
 // BSD-3-Clause), the converter read_csv used by default: at most 17 significant digits (leading
 // zeros included) accumulated in a double, then one multiply or divide by a power of ten.
-std::optional<double> precise_xstrtod_v30(std::string_view s) noexcept {
+// pandas 2.x differs in three ways (`v2`): the exponent is read digit by digit (no whitespace
+// after the 'e'), and an exponent above 308 or an overflow to +-inf makes the field not a number.
+std::optional<double> precise_xstrtod_v30(std::string_view s, bool v2) noexcept {
   const char* p = s.data();
   const char* const end = p + s.size();
   while (p < end && is_space(*p)) ++p;
@@ -134,10 +136,10 @@ std::optional<double> precise_xstrtod_v30(std::string_view s) noexcept {
   if (negative) number = -number;
 
   if (p < end && (*p == 'e' || *p == 'E')) {
-    // strtol: optional whitespace and sign, then digits. With no digits the marker stays
-    // unconsumed and the field is rejected as trailing garbage below.
+    // pandas 3.0: strtol (optional whitespace and sign, then digits); pandas 2.x: sign and
+    // digits only. With no digits the marker stays unconsumed and the field is rejected below.
     const char* q = p + 1;
-    while (q < end && is_space(*q)) ++q;
+    while (!v2 && q < end && is_space(*q)) ++q;
     bool exp_negative = false;
     if (q < end && (*q == '+' || *q == '-')) {
       exp_negative = *q == '-';
@@ -157,6 +159,7 @@ std::optional<double> precise_xstrtod_v30(std::string_view s) noexcept {
 
   const auto& e = powers_of_ten();
   if (exponent > 308) {
+    if (v2) return std::nullopt;  // ERANGE
     number = number == 0.0 ? 0.0 : (number > 0.0 ? HUGE_VAL : -HUGE_VAL);
   } else if (exponent > 0) {
     number *= e[static_cast<std::size_t>(exponent)];
@@ -170,9 +173,36 @@ std::optional<double> precise_xstrtod_v30(std::string_view s) noexcept {
   } else {
     number /= e[static_cast<std::size_t>(-exponent)];
   }
+  if (v2 && std::isinf(number)) return std::nullopt;  // ERANGE
   while (p < end && is_space(*p)) ++p;
   if (p != end) return std::nullopt;
   return number;
+}
+
+/// Fields pandas 2.x mishandles, left to pandas: an integer part beyond int64 (its integer
+/// pre-check ignores what follows the digits, so ".5" does not save the field) and exponents of
+/// more than 9 digits (accumulated in a 32-bit int, which wraps; some values crash pandas).
+bool v2_unsupported(std::string_view s) noexcept {
+  std::size_t p = 0;
+  while (p < s.size() && is_space(s[p])) ++p;
+  if (p < s.size() && (s[p] == '+' || s[p] == '-')) ++p;
+  std::size_t digits = p;
+  while (digits < s.size() && is_digit(s[digits])) ++digits;
+  if (digits > p) {
+    bool overflow = false;
+    (void)parse_pandas_int64(s.substr(0, digits), overflow);
+    if (overflow) return true;
+  }
+  const std::size_t marker = s.find_first_of("eE");
+  if (marker == std::string_view::npos) return false;
+  std::size_t q = marker + 1;
+  if (q < s.size() && (s[q] == '+' || s[q] == '-')) ++q;
+  std::size_t exp_digits = 0;
+  while (q < s.size() && is_digit(s[q])) {
+    ++q;
+    ++exp_digits;
+  }
+  return exp_digits > 9;
 }
 
 // --- pandas >= 3.1 (pandas/_libs/src/parser/tokenizer.cpp and fast_float_wrappers.cpp) ---------
@@ -552,7 +582,7 @@ Column convert(std::string name, const Tokens& t, std::size_t col, Pandas pandas
     }
     bool overflow = false;
     const auto v = parse_pandas_int64(f, overflow);
-    if (overflow) {
+    if (overflow || (pandas == Pandas::v2 && v2_unsupported(f))) {
       throw Unsupported("column " + quoted(c.name) + " has integers outside the int64 range");
     }
     if (v) {
@@ -572,7 +602,7 @@ Column convert(std::string name, const Tokens& t, std::size_t col, Pandas pandas
     // pandas marked the missing slots with INT64_MIN, so a real INT64_MIN came out as NaN too.
     c.kind = ColumnKind::float64;
     c.floats.assign(n, std::numeric_limits<double>::quiet_NaN());
-    const bool min_is_na = pandas == Pandas::v2_v30;
+    const bool min_is_na = pandas != Pandas::v31;
     for (std::size_t r = 0; r < n; ++r) {
       if (na[r] == 0 && !(min_is_na && ints[r] == std::numeric_limits<std::int64_t>::min())) {
         c.floats[r] = static_cast<double>(ints[r]);
@@ -635,7 +665,8 @@ bool is_default_na(std::string_view field) noexcept {
 }
 
 std::optional<double> parse_pandas_double(std::string_view field, Pandas pandas) noexcept {
-  if (const auto v = pandas == Pandas::v31 ? precise_xstrtod_v31(field) : precise_xstrtod_v30(field))
+  if (const auto v = pandas == Pandas::v31 ? precise_xstrtod_v31(field)
+                                           : precise_xstrtod_v30(field, pandas == Pandas::v2))
     return v;
   if (iequals(field, "inf") || iequals(field, "+inf") || iequals(field, "infinity") ||
       iequals(field, "+infinity")) {

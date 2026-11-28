@@ -25,7 +25,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from predictive_audit import _backend, baselines
-from predictive_audit.cli import _PANDAS_31, main
+from predictive_audit.cli import _PANDAS_VERSION, main
 
 NATIVE = _backend._load_native()  # the extension itself, whichever backend is active
 pytestmark = [
@@ -40,7 +40,7 @@ import check  # noqa: E402
 sys.path.insert(0, str(Path(__file__).parent))
 from test_native_parity_audit import _assert_same, _make_frame, same_text  # noqa: E402
 
-_COMPAT = (baselines._PANDAS_EWM_COM1_UPDATE, _PANDAS_31)  # the installed pandas' behaviour
+_COMPAT = (baselines._PANDAS_EWM_COM1_UPDATE, _PANDAS_VERSION)  # the installed pandas' behaviour
 
 
 def _reference(args: list[str]) -> tuple[int, str, str]:
@@ -104,8 +104,12 @@ def test_cli_matches_reference(seed: int, fmt: str, fail_on: str, tsv: bool) -> 
         df.to_csv(path, sep="\t" if tsv else ",", index=False)
         args = _cli_args(path, kwargs, fmt, fail_on)
         native, reference = _native(args), _reference(args)
-    assert native[0] == reference[0] and native[2] == reference[2], (args, native, reference)
     lapack = kwargs["task"] == "classification" and bool(kwargs["ar_lags"])
+    if lapack and reference[0] != 2 and _ar_is_best(reference[1], fmt):
+        # Verdict and checks depend on a BLAS-dependent baseline (see test_native_parity_audit).
+        assert native[0] in (0, 1) and native[2] == reference[2]
+        return
+    assert native[0] == reference[0] and native[2] == reference[2], (args, native, reference)
     if reference[0] == 2 or not reference[1]:
         assert native[1] == reference[1]
     elif fmt == "json":
@@ -115,6 +119,12 @@ def test_cli_matches_reference(seed: int, fmt: str, fail_on: str, tsv: bool) -> 
             _assert_same(dn, dp, lapack_ties=lapack)
     elif not lapack:
         assert same_text(native[1], reference[1]), args
+
+
+def _ar_is_best(out: str, fmt: str) -> bool:
+    if fmt == "json":
+        return "linear AR" in json.loads(out)["best_baseline"]
+    return any("linear AR" in line and "<- best baseline" in line for line in out.splitlines())
 
 
 def _frame(n: int = 200) -> pd.DataFrame:

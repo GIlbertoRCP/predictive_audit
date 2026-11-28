@@ -841,7 +841,7 @@ std::span<const double> numeric(Inputs& in, const Column& c) {
   switch (c.kind) {
     case ColumnKind::int64:
     case ColumnKind::boolean:
-      out.assign(c.ints.begin(), c.ints.end());
+      out.resize(c.ints.size());
       for (std::size_t i = 0; i < c.ints.size(); ++i) out[i] = static_cast<double>(c.ints[i]);
       break;
     case ColumnKind::float64:

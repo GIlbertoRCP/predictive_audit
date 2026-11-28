@@ -22,8 +22,9 @@ else:  # pragma: no cover - Python 3.10 fallback
         tomllib = None  # type: ignore[assignment]
 
 
-# The native CLI reproduces the installed pandas' read_csv, whose float parser changed in 3.1.
-_PANDAS_31 = tuple(int(v) for v in pd.__version__.split(".")[:2] if v.isdigit()) >= (3, 1)
+# The native CLI reproduces the installed pandas' read_csv, whose float parser changed in 3.0
+# and again in 3.1.
+_PANDAS_VERSION = (int(pd.__version__.split(".")[0]), int(pd.__version__.split(".")[1]))
 
 
 def _csv_list(value: str | None) -> list[str]:
@@ -149,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         # It hands back inputs only pandas reads (Parquet, Feather, missing key values, ...),
         # and those run through the reference implementation below.
         code, out, err, fallback, _reason = native.cli_main(
-            args_list, baselines._PANDAS_EWM_COM1_UPDATE, _PANDAS_31
+            args_list, baselines._PANDAS_EWM_COM1_UPDATE, _PANDAS_VERSION
         )
         if not fallback:
             sys.stdout.write(out)

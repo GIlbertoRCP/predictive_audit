@@ -26,9 +26,9 @@ std::uint64_t bits(double x) {
 
 }  // namespace
 
-TEST_CASE("pandas 2.x/3.0 float conversion: precise_xstrtod", "[csv]") {
+TEST_CASE("pandas 3.0 float conversion: precise_xstrtod", "[csv]") {
   const auto parse_pandas_double = [](std::string_view s) {
-    return paudit::io::parse_pandas_double(s, paudit::io::Pandas::v2_v30);
+    return paudit::io::parse_pandas_double(s, paudit::io::Pandas::v30);
   };
   CHECK(*parse_pandas_double("0.1") == 0.1);
   CHECK(*parse_pandas_double(" -2.5e3 ") == -2500.0);
@@ -135,4 +135,24 @@ TEST_CASE("pandas >= 3.1 float conversion: fast_float, then the rewritten fallba
   // A '+' with surrounding whitespace takes the fallback, which truncates to 17 digits.
   CHECK(*parse(" +16186104369156741856.326838832230") == 1.618610436915674e+19);
   CHECK(*parse("+16186104369156741856.326838832230") == 1.6186104369156741e+19);
+}
+
+TEST_CASE("pandas 2.x float conversion: overflow is an error, no space after 'e'", "[csv]") {
+  using paudit::io::Pandas;
+  const auto parse = [](std::string_view s) { return paudit::io::parse_pandas_double(s, Pandas::v2); };
+  CHECK_FALSE(parse("1e400"));
+  CHECK_FALSE(parse("-0e999"));
+  CHECK_FALSE(parse("9e308"));
+  CHECK_FALSE(parse("1e 5"));
+  CHECK(*parse("1.7976931348623157e308") == 1.7976931348623157e308);
+  CHECK(*parse("1e-320") == 1e-320);
+  CHECK(*parse("1e+0000000005") == 1e5);
+  CHECK(*parse("-Infinity") == -HUGE_VAL);
+  // An integer part beyond int64, or an exponent of more than 9 digits, is left to pandas.
+  CHECK_THROWS_AS(read_csv("a\n18446744073709551616.5\n", ',', Pandas::v2), Unsupported);
+  CHECK_THROWS_AS(read_csv("a\n1e4294967296\n", ',', Pandas::v2), Unsupported);
+  CHECK(read_csv("a\n18446744073709551616.5\n", ',', Pandas::v31).columns[0].kind == ColumnKind::float64);
+  CHECK(paudit::io::pandas_for_version(2, 3) == Pandas::v2);
+  CHECK(paudit::io::pandas_for_version(3, 0) == Pandas::v30);
+  CHECK(paudit::io::pandas_for_version(3, 2) == Pandas::v31);
 }

@@ -27,12 +27,18 @@ namespace paudit::io {
 
 enum class ColumnKind : std::uint8_t { int64, float64, boolean, string };
 
-/// Which pandas read_csv to reproduce. The float converter and the int-with-missing rule
-/// changed in pandas 3.1.
+/// Which pandas read_csv to reproduce: its float converter changed in 3.0 and again in 3.1.
 enum class Pandas : std::uint8_t {
-  v2_v30,  ///< pandas 2.x and 3.0: precise_xstrtod (17 digits in a double, FMA on macOS arm64)
-  v31,     ///< pandas >= 3.1: fast_float (correctly rounded), with a rewritten fallback
+  v2,   ///< pandas 2.x: precise_xstrtod, overflow is an error, no space after 'e'
+  v30,  ///< pandas 3.0: precise_xstrtod (17 digits in a double, FMA on macOS arm64)
+  v31,  ///< pandas >= 3.1: fast_float (correctly rounded), with a rewritten fallback
 };
+
+/// The Pandas value for a pandas (major, minor) version.
+[[nodiscard]] constexpr Pandas pandas_for_version(int major, int minor) noexcept {
+  if (major < 3) return Pandas::v2;
+  return (major == 3 && minor == 0) ? Pandas::v30 : Pandas::v31;
+}
 
 struct Column {
   std::string name;
