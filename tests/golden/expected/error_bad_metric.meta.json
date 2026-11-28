@@ -1,0 +1,4 @@
+{
+  "exit_code": 2,
+  "stderr": "predictive-audit: error: metric 'f1' is not valid for regression; choose from ('mae', 'rmse', 'r2', 'smape')\n"
+}

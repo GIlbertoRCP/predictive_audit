@@ -857,7 +857,14 @@ def _temporal_split(
         grp_start = np.zeros(n, dtype=bool)
         grp_start[0] = True
     else:
-        g_arr = gkey.to_numpy(dtype=np.int64)
+        # ngroup() is NaN where a group key is missing. Those rows sort last, so they form one
+        # contiguous block: give it its own group instead of casting NaN to int64, which is
+        # INT64_MIN on x86-64 (an IndexError below) and 0 on arm64 (merged into group 0).
+        g_float = gkey.to_numpy(dtype=np.float64)
+        missing = np.isnan(g_float)
+        g_arr = np.where(missing, 0.0, g_float).astype(np.int64)
+        if missing.any():
+            g_arr[missing] = int(np.max(g_arr[~missing])) + 1 if (~missing).any() else 0
         n_groups = int(np.max(g_arr)) + 1
         grp_start = np.empty(n, dtype=bool)
         grp_start[0] = True

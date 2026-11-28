@@ -1,0 +1,14 @@
+VERDICT: FAIL
+target: y_next   task: regression   horizon: 1   metric: mae   rows scored: 267
+MASE (vs persistence): 1.1310
+
+model                          mae     rmse    r2       smape 
+pred  <- model                 0.3975  0.4887  0.5298   0.8328
+persistence  <- best baseline  0.3515  0.4260  0.6427   0.8005
+moving average (3)             0.6016  0.7174  -0.0130  1.1774
+training mean                  0.6365  0.7130  -0.0008  1.9271
+
+[INFO] label memory: Lag-1 autocorrelation of the target is 0.822; persistence scores mae 0.351.
+[FAIL] beats trivial baselines: Does not beat the best trivial baseline: mae reduction vs persistence = -0.0460 (95% block-bootstrap CI -0.0682 to -0.0223, DM p=0.0017).
+[PASS] temporal split: Every test row comes after the training data in time.
+[FAIL] feature leakage: Features copy future target values: leak ~ y[t+1] (|r|=1.0000).

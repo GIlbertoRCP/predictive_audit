@@ -1,0 +1,21 @@
+**Verdict: FAIL**
+
+- target: y_next   task: regression   horizon: 1   metric: mae   rows scored: 267
+- seasonal period: 49 steps
+- MASE (vs persistence): 1.1310
+
+| model | mae | rmse | r2 | smape |
+|---|---|---|---|---|
+| pred  <- model | 0.3975 | 0.4887 | 0.5298 | 0.8328 |
+| persistence | 0.3515 | 0.4260 | 0.6427 | 0.8005 |
+| moving average (3) | 0.6016 | 0.7174 | -0.0130 | 1.1774 |
+| training mean | 0.6365 | 0.7130 | -0.0008 | 1.9271 |
+| ewma (3) | 0.5142 | 0.5975 | 0.2971 | 1.1070 |
+| seasonal naive (m=49)  <- best baseline | 0.1822 | 0.2451 | 0.8817 | 0.4731 |
+
+| check | status | finding |
+|---|---|---|
+| label memory | INFO | Lag-1 autocorrelation of the target is 0.822; persistence scores mae 0.351. |
+| beats trivial baselines | FAIL | Does not beat the best trivial baseline: mae reduction vs seasonal naive (m=49) = -0.2153 (95% block-bootstrap CI -0.2479 to -0.1815, DM p=4.76e-27). |
+| reported score | FAIL | Reported mae 0.2; seasonal naive (m=49) alone gets 0.1822 on the same rows. The claim is not evidence of forecasting skill. |
+| temporal split | PASS | Every test row comes after the training data in time. |

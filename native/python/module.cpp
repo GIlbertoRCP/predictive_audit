@@ -23,9 +23,12 @@
 #include <variant>
 #include <vector>
 
+#include "../src/pyformat.hpp"
 #include "paudit/audit.hpp"
 #include "paudit/baselines.hpp"
 #include "paudit/bootstrap.hpp"
+#include "paudit/cli.hpp"
+#include "paudit/csv.hpp"
 #include "paudit/inference.hpp"
 #include "paudit/metrics.hpp"
 #include "paudit/parallel.hpp"
@@ -448,7 +451,82 @@ NB_MODULE(_native, m) {
       "inputs"_a, "config"_a, "series"_a, "n_series"_a,
       "Audit every series in parallel (rows with series == -1 are skipped).");
 
+  // --- command line --------------------------------------------------------------------------------
+  m.def(
+      "cli_main",
+      [](const std::vector<std::string>& args, bool ewm_com1_update, std::pair<int, int> pandas_version) {
+        paudit::cli::Options options;
+        options.allow_fallback = true;
+        options.ewm_com1_update = ewm_com1_update;
+        options.pandas = paudit::io::pandas_for_version(pandas_version.first, pandas_version.second);
+        paudit::cli::Result r;
+        {
+          const nb::gil_scoped_release release;
+          r = paudit::cli::run(args, options);
+        }
+        return std::make_tuple(r.exit_code, r.out, r.err, r.fallback, r.fallback_reason);
+      },
+      "args"_a, "ewm_com1_update"_a, "pandas_version"_a,
+      "Run the predictive-audit CLI natively: (exit code, stdout, stderr, fallback, reason). "
+      "fallback=True means the input needs the pandas implementation; nothing was written.");
+
   // --- test support -------------------------------------------------------------------------------
+  m.def(
+      "read_csv",
+      [](const std::string& text, char sep, std::pair<int, int> pandas_version) {
+        paudit::io::Table t;
+        try {
+          const nb::gil_scoped_release release;
+          t = paudit::io::read_csv(
+              text, sep, paudit::io::pandas_for_version(pandas_version.first, pandas_version.second));
+        } catch (const paudit::io::ParseError& e) {
+          throw nb::value_error(e.what());
+        } catch (const paudit::io::Unsupported& e) {
+          PyErr_SetString(PyExc_NotImplementedError, e.what());
+          throw nb::python_error();
+        }
+        nb::list cols;
+        for (auto& c : t.columns) {
+          nb::object values;
+          std::string kind;
+          switch (c.kind) {
+            case paudit::io::ColumnKind::int64:
+              kind = "int64";
+              values = nb::cast(to_numpy(std::move(c.ints)));
+              break;
+            case paudit::io::ColumnKind::boolean:
+              kind = "bool";
+              values = nb::cast(to_numpy(std::move(c.ints)));
+              break;
+            case paudit::io::ColumnKind::float64:
+              kind = "float64";
+              values = nb::cast(to_numpy(std::move(c.floats)));
+              break;
+            case paudit::io::ColumnKind::string: {
+              kind = "str";
+              nb::list items;
+              for (std::size_t i = 0; i < c.strings.size(); ++i) {
+                if (c.missing[i] != 0) {
+                  items.append(nb::none());
+                } else {
+                  items.append(nb::str(c.strings[i].c_str(), c.strings[i].size()));
+                }
+              }
+              values = items;
+              break;
+            }
+          }
+          cols.append(nb::make_tuple(nb::str(c.name.c_str(), c.name.size()), kind, values));
+        }
+        return cols;
+      },
+      "text"_a, "sep"_a, "pandas_version"_a,
+      "Parse CSV text like pandas.read_csv: [(name, kind, values)]. Raises ValueError for pandas "
+      "errors and NotImplementedError for inputs the native reader leaves to pandas.");
+  m.def(
+      "py_repr", [](double x) { return paudit::detail::py_repr(x); }, "x"_a,
+      "repr(float) as the JSON writer spells it.");
+
   m.def(
       "rng_integers",
       [](std::uint64_t seed, std::uint64_t high, std::size_t size) {

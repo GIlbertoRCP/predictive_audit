@@ -1,0 +1,4 @@
+{
+  "exit_code": 2,
+  "stderr": "predictive-audit: error: data file not found: does_not_exist.csv\n"
+}

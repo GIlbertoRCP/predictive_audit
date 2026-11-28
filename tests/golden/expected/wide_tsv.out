@@ -1,0 +1,14 @@
+**Verdict: WARN**
+
+- target: value   task: regression   horizon: 1   metric: mae   rows scored: 160
+
+| model | mae | rmse | r2 | smape |
+|---|---|---|---|---|
+| persistence  <- best baseline | 0.7790 | 0.9921 | 0.9884 | 0.2216 |
+| moving average (3) | 0.9202 | 1.1532 | 0.9843 | 0.2757 |
+| training mean | 7.8244 | 9.4213 | -0.0465 | 1.8875 |
+
+| check | status | finding |
+|---|---|---|
+| label memory | WARN | The target at t+1 is mostly a copy of the target at t (lag-1 autocorrelation 0.994, persistence mae 0.779). Any model will post a high score here; only the margin over persistence means anything. |
+| temporal split | PASS | Every test row comes after the training data in time. |

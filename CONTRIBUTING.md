@@ -25,6 +25,8 @@ make native-asan          # same, with AddressSanitizer + UndefinedBehaviorSanit
 make native-tsan          # same, with ThreadSanitizer (the bootstrap runs on a thread pool)
 make bench-native         # Python reference vs native kernels -> benchmarks/native_kernels.json
 make format               # clang-format (pinned 19.1.7) on native/
+make golden-check         # the standalone binary vs the golden CLI outputs in tests/golden/
+make golden               # re-record those outputs from the pure-Python CLI (review the diff)
 ```
 
 New native kernels keep the existing Python signature and dispatch on `_backend.native` at call
@@ -34,6 +36,12 @@ inputs through both backends. Where NumPy's evaluation order is defined (pairwis
 reproduce NumPy's order rather than loosening a tolerance. The two documented exceptions are
 results that come from LAPACK/BLAS (Ridge AR solves, dot products), and pandas' EWMA, whose own
 arm64 build fuses multiply-adds. Parity tests scale their tolerance to the problem in those cases.
+
+The CLI has two more kinds of parity checks:
+- **The CSV reader** (`tests/test_native_csv.py`) must give exactly the `pandas.read_csv` columns, floats bit for bit, on generated files. pandas' float parser differs between 2.x, 3.0 and 3.1, so the reader follows the installed pandas.
+- **The CLI** (`tests/test_native_cli.py`, `tests/golden/`) must match the Python CLI's exit codes and stderr exactly, and its text/Markdown output byte for byte. The exception is a BLAS-computed number that sits exactly on a rounding boundary: it may print one unit apart. JSON must match up to the BLAS-bound digits. The golden files are exact.
+
+When a pandas behaviour is a bug rather than a rule (bare-CR line endings, for example), the reader raises `Unsupported` so pandas handles that input; it does not copy the bug.
 
 Native kernels use all cores by default; set `PREDICTIVE_AUDIT_THREADS=N` (or call
 `predictive_audit._native.set_num_threads(N)`) to limit them. Results never depend on the

@@ -1,0 +1,13 @@
+VERDICT: FAIL
+target: congested_next   task: classification   horizon: 1   metric: f1   rows scored: 499
+positive rate: 0.385
+
+model                                 f1      pr_auc  mcc     balanced_accuracy  accuracy  roc_auc  brier 
+GBM  <- model                         0.6338  0.5455  0.4038  0.7021             0.7174    0.7045   0.2364
+persistence                           0.6649  0.5704  0.4545  0.7275             0.7415    0.7275   0.2585
+moving average (3)  <- best baseline  0.7077  0.6878  0.5204  0.7617             0.7715    0.8234   0.1708
+majority class                        0.0000  0.3848  0.0000  0.5000             0.6152    0.5000   0.3848
+
+[INFO] label memory: Lag-1 autocorrelation of the target is 0.455; persistence scores f1 0.665.
+[FAIL] beats trivial baselines: Does not beat the best trivial baseline: f1 gain over moving average (3) = -0.0739 (95% block-bootstrap CI -0.1403 to +0.0017).
+[PASS] temporal split: Every test row comes after the training data in time.

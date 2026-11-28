@@ -100,7 +100,12 @@ def test_compute_is_bit_identical(metric: str, n: int, seed: int) -> None:
     y, m, _ = _series(seed, n, metric)
     for threshold in (0.5, 0.25):
         native, python = _both(metrics.compute, metric, y, m, threshold=threshold)
-        assert _same(native, python)
+        if metric == "r2" and np.isfinite(python):
+            # The reference's total sum of squares is np.dot, i.e. BLAS, whose summation order
+            # (and so its last bit) differs between OpenBLAS and Accelerate.
+            assert native == pytest.approx(python, rel=1e-13, abs=1e-15)
+        else:
+            assert _same(native, python)
 
 
 def test_compute_handles_nan_and_degenerate_inputs() -> None:

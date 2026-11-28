@@ -1,6 +1,6 @@
 # Native C++ Core — Implementation Plan
 
-**Status:** Phases 0–3 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
+**Status:** Phases 0–4 done · **Target release:** v0.3.0 (kernels) → v0.4.0 (standalone binary)
 
 ## Goal
 
@@ -38,9 +38,9 @@ Record every one of these before and after in `BENCHMARKS.md`. They are the head
 | FFT | **pocketfft** (header-only C++) | It is NumPy's own FFT backend, so autocovariances match to ~1e-15. |
 | Linear algebra | Hand-rolled Cholesky for the (p+1)×(p+1) Ridge system, QR fallback | Systems are ≤ ~20×20; no need for Eigen. Add Eigen later only if needed. |
 | Student-t tail (DM p-value) | In-house regularized incomplete beta (Lentz continued fraction, Stirling-differenced log-beta for large df) | Matches `scipy.stats.t.sf` to < 2e-9 relative over df 1–5e7 without a large Boost download. |
-| CSV/TSV parsing | In-house, `mmap` + chunked multithreaded parse + **fast_float** | Keeps the binary small and static; good engineering showcase. |
+| CSV/TSV parsing | In-house tokenizer + per-column parallel conversion; pandas' own float converters (ports of `precise_xstrtod` for pandas 2.x and 3.0, **fast_float** for ≥ 3.1) | Results must equal `pd.read_csv` bit for bit, so a correctly rounded parser alone is not enough. |
 | Parquet / Feather | Optional `PAUDIT_WITH_ARROW=ON` build flag | Arrow is heavy; ship it in the wheel path (pyarrow) first, native later. |
-| CLI args / config | **CLI11** + **toml++** | Header-only; matches today's argparse + TOML-defaults behaviour. |
+| CLI args / config | Hand-written argparse-compatible parser + **toml++** | Matches argparse (prefix abbreviations, negative-number values, messages) and the TOML-defaults behaviour exactly. |
 | JSON | Hand-written strict RFC 8259 writer | Small surface; must reproduce `json.dumps(indent=2)` layout and NaN→`null`. |
 | Tests / benchmarks | **Catch2** + **Google Benchmark** | Native unit tests; Python parity tests stay in pytest + hypothesis. |
 | Dependency fetch | CMake `FetchContent` pinned by commit/tag | No system packages required. |
@@ -146,24 +146,35 @@ Port `metrics.py` behind the same Python signatures:
 
 ### Phase 4: Standalone CLI (≈2 weeks)
 
-- [ ] `cli/main.cpp` with the same flags as `cli.py` (CLI11), including the two-pass TOML defaults (CLI flags override `[audit]` table) and `--wide` / `--wide-keep`.
-- [ ] CSV/TSV reader matching `pd.read_csv` defaults that matter:
-  - numeric vs string column inference;
-  - the default NA strings (`""`, `NA`, `N/A`, `NaN`, `nan`, `null`, `NULL`, `#N/A`, …);
-  - quoted fields;
-  - BOM;
-  - CRLF line endings.
-- [ ] Time columns: numeric sort if the column parses as numeric, otherwise lexicographic. This matches today's behaviour, because the CLI does not parse dates.
-- [ ] Renderers: text / markdown byte-identical to `report.py`. JSON must follow the same key order and `indent=2` layout, use NaN/Inf → `null`, and print floats with shortest round-trip `std::to_chars` + `.0` for integral floats (as Python `repr` does).
-- [ ] `--threads N` (default: hardware concurrency).
-- [ ] Python's `predictive-audit` console script calls `_native.cli_main(argv)`, so there is one CLI implementation.
+- [x] `paudit::cli::run` (`native/src/cli.cpp`) with the same flags, defaults, messages and 0/1/2 exit codes as `cli.py`, plus `--threads` and `--version`:
+  - The argument parser is hand-written instead of CLI11, because the goal is argparse's behaviour: unique-prefix abbreviations (`--targ`), `--flag=value`, negative numbers as values, and argparse's error messages.
+  - TOML config uses the same two-pass rule: flags override the `[audit]` table. String values go through each flag's type conversion and other TOML types are used as they are, as `set_defaults` does. TOML is read with toml++.
+  - `--wide` / `--wide-keep` reshape natively, which also covers the `wide_to_long` item moved from Phase 2.
+- [x] The CSV/TSV reader (`native/src/csv.cpp`) gives the same columns as `pd.read_csv` with default options:
+  - **Column types:** int64, float64, bool or string, with pandas' inference order; ints with missing values become float64.
+  - **Header and text:** pandas' 19 default NA strings; quoted fields with doubled quotes; BOM; CRLF; blank and whitespace-only lines skipped; `Unnamed: i` and `.1`/`.2` header names; pandas' `ParserError`/`EmptyDataError` messages, including its line numbering.
+  - **Floats are bit-identical, which meant porting pandas' converter.** pandas' default float parser is not correctly rounded, and it differs across three pandas generations:
+    - pandas **3.0** (`precise_xstrtod`) keeps 17 digits in a double. Its **macOS arm64 wheels are compiled with FMA contraction** and its Linux and Windows wheels are not, so the last bit differs between platforms for ~6% of 17-digit inputs. Checked on macOS arm64, Linux arm64 and x86-64.
+    - pandas **2.x** uses the same digit loop, but an exponent above 308 or an overflow to ±inf is an error, so the field stays text. It also allows no whitespace after the `e`. Two inputs are left to pandas:
+      - an integer part beyond int64, because its integer pre-check ignores a trailing `.5`;
+      - exponents of more than 9 digits, because they accumulate in a 32-bit int that wraps (`1e2147483648` segfaults pandas 2.3.3).
+    - pandas **3.1** switched to fast_float, plus a rewritten fallback for tokens fast_float declines (a `+` sign with surrounding whitespace, …).
 
-**Golden tests:** run the 0.2.0 Python CLI on the case datasets and synthetic fixtures, then store the outputs in `tests/golden/`.
-- Deterministic fields must match exactly.
-- Bootstrap CIs are compared with a tolerance.
-- Text and markdown are snapshot-tested against native output once validated.
+    The reader implements all three and follows the installed pandas (checked against 2.3.3, 3.0.6 and 3.1.1). The standalone binary follows pandas ≥ 3.1.
+  - **Left to pandas (`Unsupported`):** integers beyond int64, a first row longer than the header (pandas turns it into an index), invalid UTF-8, and bare-CR line endings, where pandas' tokenizer has bugs (repeated fields after a CR followed by whitespace, a dropped leading field after a blank line).
+- [x] Time columns: numeric if the column parses as numbers, otherwise sorted as text, as today.
+- [x] Renderers (`native/src/report.cpp`): text and Markdown byte-identical to `report.py`. JSON follows `json.dumps(indent=2)`: same key order, ASCII escapes with surrogate pairs, NaN/Inf → `null`, and Python `repr` floats. `std::to_chars` needs macOS 13.3+, so floats use shortest round-trip via `snprintf`/`strtod`, with the power-of-two neighbour case handled. That matches `repr` on 2M random doubles and every power of two.
+- [x] `--threads N` (default: `PREDICTIVE_AUDIT_THREADS`, else all cores). Reports don't depend on it.
+- [x] The `predictive-audit` console script calls `_native.cli_main(argv)`, so there is one CLI implementation. Inputs only pandas reads (Parquet, Feather, compressed files, missing key values, a text column used as numbers, …) come back as `fallback` and run through the reference implementation. The standalone binary reports them as errors.
 
-**Done when:** `predictive-audit data.csv …` runs from the native binary with no Python on the machine, and its startup is measured in ms.
+**Golden tests** (`tests/golden/`): 11 cases, covering all three formats, a TOML config, `--wide` on TSV, a BOM/CRLF/quoted file and four errors. They were recorded from the pure-Python reference CLI and are checked by a stdlib-only script, so CI runs them against the standalone binary on Linux, macOS and Windows. Exit codes, stderr, text and Markdown must match byte for byte. JSON floats are compared to 1e-9 because two reference values come from BLAS dot products.
+
+**Result:**
+- **Startup:** `predictive-audit --version` takes **4.7 ms** against 246 ms for the Python CLI.
+- **Small audit:** a 10,000-row CLI audit runs in **7.3 ms** against 744 ms (100×).
+- **Panel audit:** a 785-series × 1,000-step CSV takes 0.30 s against 1.04 s; parsing the CSV is 1.8× faster than `pd.read_csv`.
+- **Parity:** 8,000 generated CSV files read identically to pandas, and 300 random CLI audits give the same output as the Python CLI.
+- **Bug found and fixed:** the reference's temporal-split check cast missing group keys to int64. That crashed on x86-64 and silently merged those rows into the first group on arm64.
 
 ### Phase 5: Distribution (≈1–2 weeks)
 

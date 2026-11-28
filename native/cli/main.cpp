@@ -1,52 +1,28 @@
-// Standalone predictive-audit executable.
-//
-// Phase 0 scaffold: only --version / --build-info are implemented. The full CLI
-// (same flags, reports and 0/1/2 exit codes as the Python CLI) lands in Phase 4;
-// see docs/NATIVE_CORE_PLAN.md.
+// Standalone predictive-audit executable: the full CLI with no Python on the machine.
+// Same flags, reports and 0/1/2 exit codes as the Python package's console script (both call
+// paudit::cli::run). Inputs only the Python package can read (Parquet, Feather, ...) exit 2 here.
 
 #include <cstdio>
+#include <string>
 #include <string_view>
+#include <vector>
 
+#include "paudit/cli.hpp"
 #include "paudit/version.hpp"
 
-namespace {
-
-constexpr int kExitError = 2;
-
-void print_usage(std::FILE* out) {
-  std::fputs(
-      "usage: predictive-audit [--version] [--build-info]\n"
-      "\n"
-      "Native predictive-audit engine (preview). Auditing data files is not\n"
-      "implemented in the native CLI yet; use the Python CLI for now.\n",
-      out);
-}
-
-}  // namespace
-
 int main(int argc, char** argv) {
-  if (argc == 2) {
-    const std::string_view arg{argv[1]};
-    if (arg == "--version") {
-      const auto v = paudit::version();
-      std::printf("predictive-audit %.*s (native)\n", static_cast<int>(v.size()), v.data());
-      return 0;
-    }
-    if (arg == "--build-info") {
-      const auto info = paudit::build_info();
-      std::printf("version:          %.*s\n", static_cast<int>(info.version.size()), info.version.data());
-      std::printf("compiler:         %.*s\n", static_cast<int>(info.compiler.size()), info.compiler.data());
-      std::printf("build type:       %.*s\n", static_cast<int>(info.build_type.size()),
-                  info.build_type.data());
-      std::printf("c++ standard:     %ld\n", info.cplusplus);
-      std::printf("hardware threads: %u\n", info.hardware_threads);
-      return 0;
-    }
-    if (arg == "-h" || arg == "--help") {
-      print_usage(stdout);
-      return 0;
-    }
+  std::vector<std::string> args(argv + 1, argv + argc);
+  if (args.size() == 1 && args[0] == "--build-info") {
+    const auto info = paudit::build_info();
+    std::printf("version:          %.*s\n", static_cast<int>(info.version.size()), info.version.data());
+    std::printf("compiler:         %.*s\n", static_cast<int>(info.compiler.size()), info.compiler.data());
+    std::printf("build type:       %.*s\n", static_cast<int>(info.build_type.size()), info.build_type.data());
+    std::printf("c++ standard:     %ld\n", info.cplusplus);
+    std::printf("hardware threads: %u\n", info.hardware_threads);
+    return 0;
   }
-  print_usage(stderr);
-  return kExitError;
+  const paudit::cli::Result result = paudit::cli::run(args);
+  std::fwrite(result.out.data(), 1, result.out.size(), stdout);
+  std::fwrite(result.err.data(), 1, result.err.size(), stderr);
+  return result.exit_code;
 }

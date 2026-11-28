@@ -1,0 +1,92 @@
+{
+  "task": "classification",
+  "target": "congested_next",
+  "horizon": 1,
+  "metric": "roc_auc",
+  "model": "score",
+  "season": null,
+  "n_eval": 499,
+  "prevalence": 0.3847695390781563,
+  "best_baseline": "moving average (3)",
+  "table": {
+    "score": {
+      "f1": 0.6337662337662338,
+      "pr_auc": 0.5455186614214349,
+      "mcc": 0.40375605696161737,
+      "balanced_accuracy": 0.7020731541802389,
+      "accuracy": 0.717434869739479,
+      "roc_auc": 0.7044567725298587,
+      "brier": 0.23636817249332848
+    },
+    "persistence": {
+      "f1": 0.6649350649350649,
+      "pr_auc": 0.5703981365148258,
+      "mcc": 0.4545009832710407,
+      "balanced_accuracy": 0.7274701411509229,
+      "accuracy": 0.7414829659318637,
+      "roc_auc": 0.7274701411509229,
+      "brier": 0.25851703406813625
+    },
+    "moving average (3)": {
+      "f1": 0.7076923076923077,
+      "pr_auc": 0.6878046074776332,
+      "mcc": 0.5204310615724409,
+      "balanced_accuracy": 0.7616551302931596,
+      "accuracy": 0.7715430861723447,
+      "roc_auc": 0.8233747285559176,
+      "brier": 0.17078601647739924
+    },
+    "majority class": {
+      "f1": 0.0,
+      "pr_auc": 0.3847695390781563,
+      "mcc": 0.0,
+      "balanced_accuracy": 0.5,
+      "accuracy": 0.6152304609218436,
+      "roc_auc": 0.5,
+      "brier": 0.3847695390781563
+    }
+  },
+  "checks": [
+    {
+      "name": "label memory",
+      "status": "INFO",
+      "summary": "Lag-1 autocorrelation of the target is 0.455; persistence scores roc_auc 0.727.",
+      "details": {
+        "lag_autocorrelation": 0.45450098327104066,
+        "persistence_roc_auc": 0.7274701411509229,
+        "agreement_with_current_state": 0.7414829659318637
+      }
+    },
+    {
+      "name": "beats trivial baselines",
+      "status": "FAIL",
+      "summary": "Does not beat the best trivial baseline: roc_auc gain over moving average (3) = -0.1189 (95% block-bootstrap CI -0.1736 to -0.0643).",
+      "details": {
+        "baseline": "moving average (3)",
+        "difference": -0.11891795602605892,
+        "ci95": [
+          -0.1736448315006811,
+          -0.06431806044042031
+        ],
+        "block_length": 16,
+        "dm_stat": null,
+        "dm_p_value": null
+      }
+    },
+    {
+      "name": "temporal split",
+      "status": "PASS",
+      "summary": "Every test row comes after the training data in time.",
+      "details": {
+        "test_rows_before_last_train_row": 0.0,
+        "mean_test_segments_per_group": 1.0,
+        "embargo_violations": 0,
+        "duplicate_timestamps": 0
+      }
+    }
+  ],
+  "schema_version": "1.0",
+  "threshold": 0.5,
+  "mase": null,
+  "verdict": "FAIL"
+}

@@ -72,6 +72,14 @@ jobs:
           bin=$(find build/native -type f \( -name predictive-audit -o -name predictive-audit.exe \) | head -n1)
           "$bin" --version
           "$bin" --build-info
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Golden CLI outputs (standalone binary, no Python package)
+        shell: bash
+        run: |
+          bin=$(find build/native -type f \( -name predictive-audit -o -name predictive-audit.exe \) | head -n1)
+          python tests/golden/check.py "$bin"
 
   sanitizers:
     name: sanitizers (${{ matrix.sanitize }})

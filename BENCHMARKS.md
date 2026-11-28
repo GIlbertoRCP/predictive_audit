@@ -128,6 +128,23 @@ Same harness, at Case 03 scale (785 series × 1,000 steps) unless noted. Rows ma
 - `batch_audit` gains the most: 785 independent audits run in parallel instead of a Python loop.
 - The import-time drop comes from not loading SciPy and scikit-learn; only the reference path needs them. For a CLI gate, startup is now dominated by pandas. The standalone binary (Phase 4) removes Python startup entirely.
 
+### Phase 4: the standalone CLI
+
+Every run is a fresh process, as in a CI step, with timings that include start-up. The columns compare three ways of running it:
+- **Python CLI:** 0.2.0's code path (`PREDICTIVE_AUDIT_BACKEND=python`).
+- **Package:** today's console script, which runs the C++ CLI behind a Python start-up.
+- **Binary:** the standalone `predictive-audit` executable.
+
+| Workload | Python CLI | Package | Binary | Binary vs Python |
+|---|---:|---:|---:|---:|
+| `--version` (start-up only) | 236.6 ms | 239.3 ms | **4.6 ms** | **51×** |
+| Audit, 10,000-row CSV | 748.1 ms | 243.5 ms | **7.9 ms** | **95×** |
+| Audit, 785 series × 1,000 steps (785k-row CSV) | 1,108.1 ms | 551.8 ms | **314.7 ms** | **3.5×** |
+| Read 785k rows × 5 columns (`pd.read_csv` vs native, in-process) | 180.0 ms | — | **101.2 ms** | **1.8×** |
+
+- For the CI-gate use case, start-up is the whole story: the binary finishes a 10k-row audit faster than Python can import NumPy.
+- On the large panel, parsing takes about a third of the binary's time. The reader tokenizes on one thread and converts columns in parallel; it reproduces pandas' own float converters, so its output is identical to `pd.read_csv`.
+
 ---
 
 ## Reproducing Benchmarks
