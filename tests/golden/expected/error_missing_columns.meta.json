@@ -1,0 +1,4 @@
+{
+  "exit_code": 2,
+  "stderr": "predictive-audit: error: columns not found: ['nope', 'pred2']\n"
+}

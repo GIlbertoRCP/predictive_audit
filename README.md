@@ -86,6 +86,17 @@ uv run predictive-audit traffic_matrix.tsv \
     --season auto --ar-lags 5 --ewma --format json --out report.json
 ```
 
+#### Standalone binary (no Python needed)
+
+The same CLI is also a single C++ executable. It reads CSV/TSV exactly as `pandas.read_csv` does, and its reports match the Python package's. It starts in about 5 ms; the Python CLI needs about 250 ms just to import.
+
+```bash
+make native   # builds build/native/predictive-audit
+build/native/predictive-audit data.csv --target y_next --pred model --time t --split split --threads 8
+```
+
+Parquet and Feather need the Python package (pyarrow); the binary says so and exits with code 2.
+
 ### Python API (Single & Multi-Series Batch Audit with FDR)
 
 ```python

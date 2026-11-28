@@ -219,10 +219,83 @@ def bench_threads(runs: int) -> list[dict[str, Any]]:
     return rows
 
 
+def _run_ms(cmd: list[str], runs: int, env: dict[str, str] | None = None) -> float:
+    """Median wall time of a fresh process (cold start included), in ms."""
+    import os
+    import subprocess
+
+    full_env = {**os.environ, **(env or {})}
+    subprocess.run(cmd, env=full_env, capture_output=True, check=False)  # warm the file cache
+    times = []
+    for _ in range(runs):
+        t0 = time.perf_counter()
+        subprocess.run(cmd, env=full_env, capture_output=True, check=False)
+        times.append((time.perf_counter() - t0) * 1000.0)
+    return float(np.median(times))
+
+
+def bench_cli(runs: int, binary: Path) -> list[dict[str, Any]]:
+    """The standalone executable vs the Python console script, as separate processes."""
+    import sys
+    import tempfile
+
+    rows: list[dict[str, Any]] = []
+    if not binary.exists():
+        print(f"(skipping CLI benchmarks: {binary} not built; run `make native`)")
+        return rows
+    rng = np.random.default_rng(4)
+    tmp = Path(tempfile.mkdtemp())
+    single = tmp / "single.csv"
+    n = 10_000
+    t = np.arange(n)
+    y = np.sin(t / 30) + rng.normal(scale=0.3, size=n)
+    pd.DataFrame({"t": t, "y": np.roll(y, -1), "pred": y + rng.normal(scale=0.2, size=n),
+                  "split": np.where(t < 7000, "train", "test")}).to_csv(single, index=False)
+    panel = tmp / "panel.csv"
+    k, steps = 785, 1000
+    tt = np.tile(np.arange(steps), k)
+    yy = np.sin(tt / 24) + rng.normal(scale=0.3, size=k * steps)
+    pd.DataFrame({
+        "od": np.repeat(np.arange(k), steps), "t": tt, "y": yy,
+        "pred": yy + rng.normal(scale=0.2, size=k * steps), "split": np.where(tt < 700, "train", "test"),
+    }).to_csv(panel, index=False)
+
+    py = [sys.executable, "-m", "predictive_audit.cli"]
+    common = ["--task", "regression", "--target", "y", "--pred", "pred", "--time", "t", "--split", "split",
+              "--fail-on", "never"]
+    workloads = [
+        ("startup: --version", ["--version"]),
+        ("CLI audit, 10,000 rows", [str(single), *common]),
+        ("CLI audit, 785 series x 1,000 steps (785k rows)", [str(panel), *common, "--group", "od"]),
+    ]
+    head = f"{'python':>13} {'package':>13} {'binary':>13} {'speedup':>8}"
+    print(f"\n{'CLI (fresh process each run)':<52} {head}")
+    for name, args in workloads:
+        ref_ms = _run_ms([*py, *args], runs, {"PREDICTIVE_AUDIT_BACKEND": "python"})
+        pkg_ms = _run_ms([*py, *args], runs, {"PREDICTIVE_AUDIT_BACKEND": "native"})
+        bin_ms = _run_ms([str(binary), *args], runs)
+        rows.append({
+            "workload": name, "python_cli_ms": round(ref_ms, 1), "package_native_ms": round(pkg_ms, 1),
+            "binary_ms": round(bin_ms, 1), "speedup": round(ref_ms / bin_ms, 1),
+        })
+        print(f"{name:<52} {ref_ms:>10.1f} ms {pkg_ms:>10.1f} ms {bin_ms:>10.1f} ms {ref_ms / bin_ms:>7.1f}x")
+
+    text = panel.read_text(encoding="utf-8")
+    pd_ms, _ = _timed(lambda: pd.read_csv(panel), runs)
+    nat_ms, _ = _timed(lambda: _native.read_csv(text, ",", True), runs)
+    rows.append({"workload": "read_csv, 785k rows x 5 columns", "python_ms": round(pd_ms, 1),
+                 "native_ms": round(nat_ms, 1), "speedup": round(pd_ms / nat_ms, 1)})
+    print(f"{'read_csv, 785k rows x 5 (pandas vs native)':<52} {pd_ms:>10.1f} ms {nat_ms:>10.1f} ms "
+          f"{pd_ms / nat_ms:>7.1f}x")
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--out", type=Path, default=Path("benchmarks/native_kernels.json"))
+    parser.add_argument("--cli", type=Path, default=Path("build/native/predictive-audit"),
+                        help="standalone executable to time (built by `make native`)")
     args = parser.parse_args()
 
     print(f"{'workload':<52} {'python':>13} {'native':>13} {'speedup':>8}")
@@ -231,6 +304,7 @@ def main() -> None:
     end_to_end = bench_audit(args.runs)
     print("\nthread scaling: f1 bootstrap, 1,000,000 rows, block 20, 2,000 draws")
     threads = bench_threads(args.runs)
+    cli = bench_cli(args.runs, args.cli)
 
     payload = {
         "platform": platform.platform(),
@@ -242,6 +316,7 @@ def main() -> None:
         "phase2_kernels": phase2,
         "audit": end_to_end,
         "thread_scaling": threads,
+        "cli": cli,
     }
     args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"\nwrote {args.out}")

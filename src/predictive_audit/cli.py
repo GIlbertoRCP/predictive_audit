@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from . import report
+from . import __version__, _backend, baselines, report
 from .audit import SEVERITY, audit
 from .reshape import wide_to_long
 
@@ -20,6 +20,10 @@ else:  # pragma: no cover - Python 3.10 fallback
         import tomli as tomllib  # type: ignore[no-redef]
     except ImportError:
         tomllib = None  # type: ignore[assignment]
+
+
+# The native CLI reproduces the installed pandas' read_csv, whose float parser changed in 3.1.
+_PANDAS_31 = tuple(int(v) for v in pd.__version__.split(".")[:2] if v.isdigit()) >= (3, 1)
 
 
 def _csv_list(value: str | None) -> list[str]:
@@ -128,10 +132,33 @@ def build_parser() -> argparse.ArgumentParser:
         default="fail",
         help="exit non-zero at this verdict or worse (for CI)",
     )
+    p.add_argument(
+        "--threads",
+        type=int,
+        help="engine threads (default: PREDICTIVE_AUDIT_THREADS or all cores)",
+    )
+    p.add_argument("--version", action="version", version=f"predictive-audit {__version__}")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    native = _backend.native
+    if native is not None:
+        # One CLI implementation: the C++ one (the same code as the standalone executable).
+        # It hands back inputs only pandas reads (Parquet, Feather, missing key values, ...),
+        # and those run through the reference implementation below.
+        code, out, err, fallback, _reason = native.cli_main(
+            args_list, baselines._PANDAS_EWM_COM1_UPDATE, _PANDAS_31
+        )
+        if not fallback:
+            sys.stdout.write(out)
+            sys.stderr.write(err)
+            return int(code)
+    return _main_python(args_list)
+
+
+def _main_python(argv: list[str]) -> int:
     parser = build_parser()
     # Two-pass parse so CLI flags always override TOML config defaults
     prelim, _ = parser.parse_known_args(argv)
@@ -143,6 +170,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     args = parser.parse_args(argv)
+    if args.threads is not None:
+        if args.threads < 1:
+            print("predictive-audit: error: --threads must be >= 1", file=sys.stderr)
+            return 2
+        if _backend.native is not None:
+            _backend.native.set_num_threads(args.threads)
     try:
         df = _load_frame(Path(args.data))
         groups = _csv_list(args.group)

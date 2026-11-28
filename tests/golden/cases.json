@@ -1,0 +1,189 @@
+{
+  "_comment": "Golden CLI cases. Arguments are relative to tests/golden; expected outputs in expected/ come from the pure-Python reference CLI (tests/golden/regenerate.py).",
+  "cases": [
+    {
+      "name": "regression_text",
+      "args": [
+        "regression_panel.csv",
+        "--task",
+        "regression",
+        "--target",
+        "y_next",
+        "--pred",
+        "pred",
+        "--group",
+        "site",
+        "--time",
+        "t",
+        "--split",
+        "split",
+        "--features",
+        "leak,load"
+      ]
+    },
+    {
+      "name": "regression_markdown_season",
+      "args": [
+        "regression_panel.csv",
+        "--task",
+        "regression",
+        "--target",
+        "y_next",
+        "--pred",
+        "pred",
+        "--group",
+        "site",
+        "--time",
+        "t",
+        "--split",
+        "split",
+        "--season",
+        "auto",
+        "--ewma",
+        "--format",
+        "markdown",
+        "--block",
+        "auto",
+        "--reported",
+        "0.2"
+      ]
+    },
+    {
+      "name": "regression_json_config",
+      "args": [
+        "regression_panel.csv",
+        "--config",
+        "audit.toml",
+        "--target",
+        "y_next",
+        "--pred",
+        "pred",
+        "--group",
+        "site",
+        "--time",
+        "t",
+        "--split",
+        "split",
+        "--format",
+        "json",
+        "--fail-on",
+        "warn"
+      ]
+    },
+    {
+      "name": "classification_text",
+      "args": [
+        "classification.csv",
+        "--target",
+        "congested_next",
+        "--pred",
+        "score",
+        "--group",
+        "link",
+        "--time",
+        "timestamp",
+        "--split",
+        "split",
+        "--model-name",
+        "GBM",
+        "--threshold",
+        "auto"
+      ]
+    },
+    {
+      "name": "classification_json_roc",
+      "args": [
+        "classification.csv",
+        "--target",
+        "congested_next",
+        "--pred",
+        "score",
+        "--group",
+        "link",
+        "--time",
+        "timestamp",
+        "--split",
+        "split",
+        "--metric",
+        "roc_auc",
+        "--format",
+        "json",
+        "--n-boot",
+        "300",
+        "--seed",
+        "7"
+      ]
+    },
+    {
+      "name": "wide_tsv",
+      "args": [
+        "wide.tsv",
+        "--wide",
+        "--split",
+        "split",
+        "--task",
+        "regression",
+        "--format",
+        "markdown"
+      ]
+    },
+    {
+      "name": "messy_csv",
+      "args": [
+        "messy.csv",
+        "--task",
+        "regression",
+        "--target",
+        "target",
+        "--pred",
+        "pred",
+        "--group",
+        "series id",
+        "--time",
+        "time",
+        "--split",
+        "split",
+        "--fail-on",
+        "never"
+      ]
+    },
+    {
+      "name": "error_missing_columns",
+      "args": [
+        "regression_panel.csv",
+        "--task",
+        "regression",
+        "--target",
+        "nope",
+        "--pred",
+        "pred2"
+      ]
+    },
+    {
+      "name": "error_bad_metric",
+      "args": [
+        "regression_panel.csv",
+        "--task",
+        "regression",
+        "--target",
+        "y_next",
+        "--metric",
+        "f1"
+      ]
+    },
+    {
+      "name": "error_no_target",
+      "args": [
+        "regression_panel.csv"
+      ]
+    },
+    {
+      "name": "error_missing_file",
+      "args": [
+        "does_not_exist.csv",
+        "--target",
+        "y"
+      ]
+    }
+  ]
+}

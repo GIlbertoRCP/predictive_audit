@@ -1,4 +1,4 @@
-.PHONY: test test-both cov lint typecheck bench bench-native site check native native-test native-asan native-tsan format
+.PHONY: test test-both cov lint typecheck bench bench-native site check native native-test native-asan native-tsan format golden golden-check
 
 test:
 	uv run pytest -v
@@ -44,6 +44,14 @@ native-tsan:
 
 bench-native:
 	uv run python benchmarks/bench_native.py --runs 15 --out benchmarks/native_kernels.json
+
+# Re-record the golden CLI outputs from the pure-Python reference (review the diff!).
+golden:
+	PREDICTIVE_AUDIT_BACKEND=python uv run python tests/golden/regenerate.py
+
+# Check the standalone binary against them.
+golden-check: native
+	python3 tests/golden/check.py build/native/predictive-audit
 
 format:
 	find native \( -name '*.cpp' -o -name '*.hpp' \) | xargs uvx clang-format==19.1.7 -i

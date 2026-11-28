@@ -1,0 +1,13 @@
+VERDICT: PASS
+target: target   task: regression   horizon: 1   metric: mae   rows scored: 40
+MASE (vs persistence): 0.4992
+
+model                          mae     rmse    r2       smape 
+pred  <- model                 0.1066  0.1177  0.9725   0.3627
+persistence  <- best baseline  0.2135  0.2356  0.8897   0.5884
+moving average (3)             0.4180  0.4620  0.5757   0.9356
+training mean                  0.6431  0.7100  -0.0020  1.9322
+
+[INFO] label memory: Lag-1 autocorrelation of the target is 0.944; persistence scores mae 0.214.
+[PASS] beats trivial baselines: Beats the best trivial baseline: mae reduction vs persistence = +0.1069 (95% block-bootstrap CI +0.1032 to +0.1105, DM p=6.16e-11).
+[PASS] temporal split: Every test row comes after the training data in time.

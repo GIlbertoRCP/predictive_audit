@@ -39,16 +39,37 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pocketfft)
 
+# toml++ (header-only): the CLI's --config files, as Python's tomllib reads them.
+FetchContent_Declare(
+  tomlplusplus
+  GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+  GIT_TAG v3.4.0
+  SOURCE_SUBDIR do-not-add-subdirectory
+)
+FetchContent_MakeAvailable(tomlplusplus)
+
+# fast_float (header-only): pandas >= 3.1 parses CSV floats with it.
+FetchContent_Declare(
+  fast_float
+  GIT_REPOSITORY https://github.com/fastfloat/fast_float.git
+  GIT_TAG v8.4.0
+  SOURCE_SUBDIR do-not-add-subdirectory
+)
+FetchContent_MakeAvailable(fast_float)
+
 # --- core library -------------------------------------------------------------
 add_library(paudit STATIC
   src/audit.cpp
   src/baselines.cpp
   src/bootstrap.cpp
+  src/cli.cpp
+  src/csv.cpp
   src/fft.cpp
   src/inference.cpp
   src/metrics.cpp
   src/parallel.cpp
   src/rank.cpp
+  src/report.cpp
   src/rng.cpp
   src/version.cpp
 )
@@ -56,7 +77,7 @@ add_library(paudit::paudit ALIAS paudit)
 target_include_directories(paudit PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
 )
-target_include_directories(paudit SYSTEM PRIVATE ${pocketfft_SOURCE_DIR})
+target_include_directories(paudit SYSTEM PRIVATE ${pocketfft_SOURCE_DIR} ${tomlplusplus_SOURCE_DIR}/include ${fast_float_SOURCE_DIR}/include)
 target_compile_features(paudit PUBLIC cxx_std_20)
 # Never fuse a*b+c into FMA: keeps results identical to NumPy and across CPUs.
 target_compile_options(paudit PUBLIC $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-ffp-contract=off>)
@@ -112,6 +133,8 @@ if(PAUDIT_BUILD_TESTS)
     tests/test_audit.cpp
     tests/test_baselines.cpp
     tests/test_bootstrap.cpp
+    tests/test_cli.cpp
+    tests/test_csv.cpp
     tests/test_inference.cpp
     tests/test_metrics.cpp
     tests/test_numeric.cpp

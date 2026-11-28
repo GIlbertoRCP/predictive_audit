@@ -1,0 +1,8 @@
+[audit]
+task = "regression"
+metric = "rmse"
+ar-lags = 3
+ewma = true
+season = "auto"
+features = ["leak", "load"]
+reported = 0.25

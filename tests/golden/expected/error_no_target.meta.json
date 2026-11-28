@@ -1,0 +1,4 @@
+{
+  "exit_code": 2,
+  "stderr": "predictive-audit: error: --target is required unless --wide is set\n"
+}

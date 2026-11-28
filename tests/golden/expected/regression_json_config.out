@@ -1,0 +1,120 @@
+{
+  "task": "regression",
+  "target": "y_next",
+  "horizon": 1,
+  "metric": "rmse",
+  "model": "pred",
+  "season": 49,
+  "n_eval": 267,
+  "prevalence": null,
+  "best_baseline": "linear AR(3)",
+  "table": {
+    "pred": {
+      "mae": 0.39751627762735064,
+      "rmse": 0.488700425012907,
+      "r2": 0.5298490154117134,
+      "smape": 0.8328481384026646
+    },
+    "persistence": {
+      "mae": 0.3514866891924996,
+      "rmse": 0.4260050909675342,
+      "r2": 0.6427423848312293,
+      "smape": 0.8005251295265071
+    },
+    "moving average (3)": {
+      "mae": 0.6016283945195007,
+      "rmse": 0.7173619534997873,
+      "r2": -0.013044668610325827,
+      "smape": 1.1774067075828818
+    },
+    "training mean": {
+      "mae": 0.6365360960877688,
+      "rmse": 0.7130159690210448,
+      "r2": -0.0008072198680710851,
+      "smape": 1.9271137741702187
+    },
+    "ewma (3)": {
+      "mae": 0.5141508943438448,
+      "rmse": 0.5975335233204372,
+      "r2": 0.2971276366120017,
+      "smape": 1.106991544164262
+    },
+    "seasonal naive (m=49)": {
+      "mae": 0.18221559202549512,
+      "rmse": 0.2451211454777511,
+      "r2": 0.8817194129313837,
+      "smape": 0.473093484447591
+    },
+    "linear AR(3)": {
+      "mae": 0.06630179005322057,
+      "rmse": 0.09248364947690665,
+      "r2": 0.9831623361663445,
+      "smape": 0.23152410628297923
+    }
+  },
+  "checks": [
+    {
+      "name": "label memory",
+      "status": "INFO",
+      "summary": "Lag-1 autocorrelation of the target is 0.822; persistence scores rmse 0.426.",
+      "details": {
+        "lag_autocorrelation": 0.8218121304112135,
+        "persistence_rmse": 0.4260050909675342
+      }
+    },
+    {
+      "name": "beats trivial baselines",
+      "status": "FAIL",
+      "summary": "Does not beat the best trivial baseline: rmse reduction vs linear AR(3) = -0.3962 (95% block-bootstrap CI -0.4255 to -0.3672, DM p=8.75e-25).",
+      "details": {
+        "baseline": "linear AR(3)",
+        "difference": -0.3962167755360003,
+        "ci95": [
+          -0.42550480631340104,
+          -0.36724690723496456
+        ],
+        "block_length": 10,
+        "dm_stat": -14.35897979867188,
+        "dm_p_value": 8.746847922334236e-25,
+        "skill_score": -4.284181882711456
+      }
+    },
+    {
+      "name": "reported score",
+      "status": "FAIL",
+      "summary": "Reported rmse 0.25; linear AR(3) alone gets 0.09248 on the same rows. The claim is not evidence of forecasting skill.",
+      "details": {
+        "reported": 0.25,
+        "baseline": "linear AR(3)",
+        "baseline_value": 0.09248364947690665,
+        "gap": -0.15751635052309335
+      }
+    },
+    {
+      "name": "temporal split",
+      "status": "PASS",
+      "summary": "Every test row comes after the training data in time.",
+      "details": {
+        "test_rows_before_last_train_row": 0.0,
+        "mean_test_segments_per_group": 1.0,
+        "embargo_violations": 0,
+        "duplicate_timestamps": 0
+      }
+    },
+    {
+      "name": "feature leakage",
+      "status": "FAIL",
+      "summary": "Features copy future target values: leak ~ y[t+1] (|r|=1.0000).",
+      "details": {
+        "max_abs_corr_with_future_target": {
+          "leak": 0.9999752918499009,
+          "load": 0.00806239454439325
+        }
+      }
+    }
+  ],
+  "schema_version": "1.0",
+  "threshold": null,
+  "mase": 1.13095684658955,
+  "verdict": "FAIL"
+}
