@@ -140,7 +140,7 @@ Check label_memory(Task task, Metric metric, std::span<const double> y, std::spa
   c.details.emplace_back("persistence_" + metric_str(metric), persist_value);
   if (task == Task::classification) {
     std::size_t same = 0;
-    for (std::size_t i = 0; i < y.size(); ++i) same += y[i] == persist[i] ? 1 : 0;
+    for (std::size_t i = 0; i < y.size(); ++i) same += y[i] == persist[i] ? std::size_t{1} : std::size_t{0};
     c.details.emplace_back("agreement_with_current_state",
                            static_cast<double>(same) / static_cast<double>(y.size()));
   }
@@ -293,7 +293,7 @@ Check temporal_split(const std::vector<std::int64_t>* gkey, std::int64_t horizon
   std::size_t n_groups = 1;
   if (gkey == nullptr) {
     for (std::size_t i = 0; i < n; ++i) clock[i] = static_cast<std::int64_t>(i);
-    grp_start[0] = 1;
+    if (!grp_start.empty()) grp_start.front() = 1;  // n > 0 here (a train row exists)
   } else {
     g = *gkey;
     n_groups = static_cast<std::size_t>(*std::max_element(g.begin(), g.end()) + 1);
@@ -318,7 +318,7 @@ Check temporal_split(const std::vector<std::int64_t>* gkey, std::int64_t horizon
     if (test[i] == 0) continue;
     ++n_test;
     const auto lt = last_train[static_cast<std::size_t>(g[i])];
-    n_before += (lt >= 0 && clock[i] < lt) ? 1 : 0;
+    n_before += (lt >= 0 && clock[i] < lt) ? std::size_t{1} : std::size_t{0};
   }
   const double share_before = static_cast<double>(n_before) / static_cast<double>(n_test);
 
